@@ -17,7 +17,7 @@ export default function LoginScreen() {
     
     // MODALES
     const [showDisclaimer, setShowDisclaimer] = useState(false);
-    const [showWaitlist, setShowWaitlist] = useState(false); // 🆕 NUEVO ESTADO
+    const [showWaitlist, setShowWaitlist] = useState(false);
     const [agreed, setAgreed] = useState(false);
 
     const handleAuthAction = async () => {
@@ -36,26 +36,31 @@ export default function LoginScreen() {
     const performRegister = async () => {
         setLoading(true);
         try {
+            // El registro suele ser JSON, pero muy estricto con los campos
             const res = await fetch(`${API_URL}/auth/register`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ 
                     username: email.toLowerCase(), 
-                    password: password,
-                    disclaimer_accepted: true 
+                    password: password 
+                    // Hemos quitado disclaimer_accepted temporalmente para asegurar compatibilidad
                 })
             });
             
             const data = await res.json();
             
-            if (!res.ok) throw new Error(data.detail || "Registration failed");
+            if (!res.ok) {
+                console.error("Detalle error registro:", data);
+                throw new Error(data.detail || "Registration failed");
+            }
 
-            await SecureStore.setItemAsync('user_token', data.access_token);
-            await SecureStore.setItemAsync('user_plan', data.plan);
+            // Si el registro devuelve token directamente:
+            if (data.access_token) {
+                await SecureStore.setItemAsync('user_token', data.access_token);
+                if (data.plan) await SecureStore.setItemAsync('user_plan', data.plan);
+            }
             
             setShowDisclaimer(false);
-            
-            // 🆕 EN LUGAR DE ALERT, MOSTRAMOS EL MODAL CYBER
             setShowWaitlist(true);
 
         } catch (e: any) {
@@ -66,42 +71,42 @@ export default function LoginScreen() {
     };
 
     const performLogin = async () => {
-    setLoading(true);
-    try {
-        // 🏗️ Preparamos los datos en formato Form Data (lo que pide el estándar de Python)
-        const formData = new URLSearchParams();
-        formData.append('username', email.toLowerCase());
-        formData.append('password', password);
+        setLoading(true);
+        try {
+            // FastAPI/Python requiere x-www-form-urlencoded para el login estándar
+            const formData = new URLSearchParams();
+            formData.append('username', email.toLowerCase());
+            formData.append('password', password);
 
-        console.log("Intentando conectar a:", `${API_URL}/auth/login`);
+            const res = await fetch(`${API_URL}/auth/login`, {
+                method: 'POST',
+                headers: { 
+                    'Content-Type': 'application/x-www-form-urlencoded' 
+                },
+                body: formData.toString()
+            });
+            
+            const data = await res.json();
+            
+            if (!res.ok) {
+                console.error("Detalle error login:", data);
+                throw new Error(data.detail || "Login failed");
+            }
 
-        const res = await fetch(`${API_URL}/auth/login`, {
-            method: 'POST',
-            headers: { 
-                'Content-Type': 'application/x-www-form-urlencoded' // 🔑 Cambio clave aquí
-            },
-            body: formData.toString()
-        });
-        
-        const data = await res.json();
-        
-        if (!res.ok) throw new Error(data.detail || "Login failed");
+            if (data.access_token) {
+                await SecureStore.setItemAsync('user_token', data.access_token);
+                if (data.plan) await SecureStore.setItemAsync('user_plan', data.plan);
+                router.replace('/(tabs)');
+            } else {
+                throw new Error("No access token received");
+            }
 
-        // Guardar tokens
-        await SecureStore.setItemAsync('user_token', data.access_token);
-        if (data.plan) {
-            await SecureStore.setItemAsync('user_plan', data.plan);
+        } catch (e: any) {
+            Alert.alert("Login Failed", e.message);
+        } finally {
+            setLoading(false);
         }
-
-        router.replace('/(tabs)');
-
-    } catch (e: any) {
-        console.error("Error de login:", e);
-        Alert.alert("Login Failed", e.message);
-    } finally {
-        setLoading(false);
-    }
-};
+    };
 
     const handleEnterApp = () => {
         setShowWaitlist(false);
@@ -163,7 +168,7 @@ export default function LoginScreen() {
                 </View>
             </KeyboardAvoidingView>
 
-            {/* 🛡️ DISCLAIMER MODAL */}
+            {/* MODAL SAFETY PROTOCOL */}
             <Modal visible={showDisclaimer} transparent animationType="slide">
                 <View style={styles.modalOverlay}>
                     <View style={styles.modalBox}>
@@ -175,13 +180,9 @@ export default function LoginScreen() {
                         <ScrollView style={styles.disclaimerScroll}>
                             <Text style={styles.disclaimerText}>
                                 <Text style={{fontWeight: 'bold', color: 'white'}}>MEDICAL DISCLAIMER & SAFETY WARNING{'\n\n'}</Text>
-                                Whisper Mind is an Artificial Intelligence designed for emotional support, coaching, and dream exploration. 
-                                <Text style={{fontWeight: 'bold', color: '#EF4444'}}> It is NOT a medical device, a doctor, or a licensed therapist.{'\n\n'}</Text>
-                                By continuing, you acknowledge that:{'\n'}
-                                1. The insights provided are generated by AI and may not always be accurate.{'\n'}
-                                2. This application does not diagnose, treat, or cure any medical or mental health condition.{'\n'}
-                                3. If you are experiencing a crisis, suicidal thoughts, or a medical emergency, you must contact local emergency services immediately.{'\n\n'}
-                                <Text style={{fontStyle: 'italic', color: '#94A3B8'}}>Whisper Mind cannot intervene in real-world emergencies.</Text>
+                                Whisper Mind is an Artificial Intelligence designed for emotional support and coaching.
+                                <Text style={{fontWeight: 'bold', color: '#EF4444'}}> It is NOT a medical device or licensed therapist.{'\n\n'}</Text>
+                                By continuing, you acknowledge that you are responsible for your own mental health.
                             </Text>
                         </ScrollView>
 
@@ -209,7 +210,7 @@ export default function LoginScreen() {
                 </View>
             </Modal>
 
-            {/* 🆕 WAITLIST / FOUNDER MODAL (NUEVO) */}
+            {/* MODAL WAITLIST */}
             <Modal visible={showWaitlist} transparent animationType="fade">
                 <View style={styles.modalOverlay}>
                     <View style={[styles.modalBox, { borderColor: '#38BDF8' }]}>
@@ -219,8 +220,8 @@ export default function LoginScreen() {
                         </View>
                         
                         <Text style={[styles.disclaimerText, { textAlign: 'center', marginBottom: 30 }]}>
-                            You have been added to the Waitlist (Free Tier).{'\n\n'}
-                            Access to advanced AI features is limited to ensure quality.
+                            You have been added to the Waitlist.{'\n\n'}
+                            Access is limited to ensure neural quality.
                         </Text>
 
                         <TouchableOpacity style={styles.founderBtn} onPress={handleEnterApp}>
@@ -235,7 +236,6 @@ export default function LoginScreen() {
                     </View>
                 </View>
             </Modal>
-
         </View>
     );
 }
@@ -243,45 +243,35 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#000' },
     content: { flex: 1, justifyContent: 'center', padding: 30 },
-    
     header: { alignItems: 'center', marginBottom: 50 },
-    logoOrb: { width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(56, 189, 248, 0.1)', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#38BDF8', marginBottom: 20, shadowColor: '#38BDF8', shadowRadius: 20, shadowOpacity: 0.5 },
+    logoOrb: { width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(56, 189, 248, 0.1)', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#38BDF8', marginBottom: 20 },
     title: { fontSize: 32, fontWeight: '900', color: 'white', letterSpacing: 4 },
     subtitle: { color: '#64748B', letterSpacing: 2, fontSize: 10, marginTop: 5 },
-
     form: { gap: 20 },
     inputContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#1e293b', borderRadius: 12, paddingHorizontal: 15, borderWidth: 1, borderColor: '#334155', height: 55 },
     inputIcon: { marginRight: 10 },
     input: { flex: 1, color: 'white', fontSize: 16 },
-    
-    mainBtn: { backgroundColor: '#38BDF8', height: 55, borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginTop: 10, shadowColor: '#38BDF8', shadowOffset: {width: 0, height: 4}, shadowOpacity: 0.3, shadowRadius: 10 },
-    btnText: { color: '#0f172a', fontWeight: '900', fontSize: 16, letterSpacing: 1 },
-    
+    mainBtn: { backgroundColor: '#38BDF8', height: 55, borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginTop: 10 },
+    btnText: { color: '#0f172a', fontWeight: '900', fontSize: 16 },
     switchBtn: { alignItems: 'center', marginTop: 20 },
     switchText: { color: '#94A3B8', fontSize: 14 },
-
-    // MODAL ESTILOS
     modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.95)', justifyContent: 'center', padding: 20 },
     modalBox: { backgroundColor: '#0f172a', borderRadius: 20, padding: 25, borderWidth: 1, borderColor: '#F59E0B', maxHeight: '80%' },
     modalHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 20 },
-    modalTitle: { color: '#F59E0B', fontSize: 18, fontWeight: 'bold', letterSpacing: 1 },
-    disclaimerScroll: { maxHeight: 300, marginBottom: 20, paddingRight: 5 },
+    modalTitle: { color: '#F59E0B', fontSize: 18, fontWeight: 'bold' },
+    disclaimerScroll: { maxHeight: 300, marginBottom: 20 },
     disclaimerText: { color: '#CBD5E1', lineHeight: 22, fontSize: 14 },
-    
-    checkboxRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 25, padding: 10, borderRadius: 10, borderWidth: 1, borderColor: 'transparent' },
-    checkboxActive: { backgroundColor: 'rgba(56, 189, 248, 0.1)', borderColor: 'rgba(56, 189, 248, 0.3)' },
+    checkboxRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 25, padding: 10 },
+    checkboxActive: { backgroundColor: 'rgba(56, 189, 248, 0.1)' },
     agreeText: { color: 'white', fontSize: 14, flex: 1 },
-
     modalActions: { flexDirection: 'row', gap: 15 },
     cancelBtn: { flex: 1, padding: 15, alignItems: 'center', borderRadius: 10, borderWidth: 1, borderColor: '#64748B' },
     cancelText: { color: '#64748B', fontWeight: 'bold' },
     acceptBtn: { flex: 2, padding: 15, alignItems: 'center', borderRadius: 10, backgroundColor: '#F59E0B' },
     acceptText: { color: '#000', fontWeight: 'bold' },
-
-    // 🆕 FOUNDER BUTTONS
     founderBtn: { height: 60, borderRadius: 12, justifyContent: 'center', alignItems: 'center', overflow: 'hidden', marginBottom: 15 },
-    founderText: { color: 'white', fontWeight: '900', fontSize: 16, letterSpacing: 1 },
-    founderSub: { color: 'rgba(255,255,255,0.8)', fontSize: 10, marginTop: 2 },
+    founderText: { color: 'white', fontWeight: '900', fontSize: 16 },
+    founderSub: { color: 'rgba(255,255,255,0.8)', fontSize: 10 },
     waitBtn: { padding: 15, alignItems: 'center' },
     waitText: { color: '#64748B', textDecorationLine: 'underline' }
 });
