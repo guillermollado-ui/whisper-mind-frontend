@@ -32,18 +32,24 @@ export default function AuthScreen() {
 
     try {
       if (isLogin) {
-        // --- LÓGICA DE LOGIN ---
-        const params = new URLSearchParams();
-        params.append('username', username.toLowerCase().trim());
-        params.append('password', password);
+        // --- 🛠️ LÓGICA DE LOGIN BLINDADA (OAuth2 Form Data) ---
+        const details: any = {
+          'username': username.toLowerCase().trim(),
+          'password': password,
+          'grant_type': 'password', // Estándar OAuth2 que a veces FastAPI requiere
+        };
+
+        const formBody = Object.keys(details)
+          .map(key => encodeURIComponent(key) + '=' + encodeURIComponent(details[key]))
+          .join('&');
 
         const response = await fetch(`${API_URL}/auth/login`, {
           method: 'POST',
           headers: { 
-            'Content-Type': 'application/x-www-form-urlencoded',
+            'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
             'Accept': 'application/json'
           },
-          body: params.toString(),
+          body: formBody,
         });
 
         const data = await response.json();
@@ -53,11 +59,12 @@ export default function AuthScreen() {
           console.log("Login exitoso. Entrando...");
           router.replace('/(tabs)'); 
         } else {
-          Alert.alert('Error', data.detail || 'Credenciales incorrectas');
+          const errorMsg = data.detail || 'Credenciales incorrectas';
+          Alert.alert('Error', typeof errorMsg === 'string' ? errorMsg : JSON.stringify(errorMsg));
         }
 
       } else {
-        // --- 🛠️ LÓGICA DE REGISTRO REFORZADA ---
+        // --- LÓGICA DE REGISTRO REFORZADA ---
         const registrationBody = { 
             username: username.toLowerCase().trim(), 
             email: username.toLowerCase().trim(), 
@@ -80,7 +87,6 @@ export default function AuthScreen() {
           Alert.alert('Éxito', 'Consciencia creada. Ahora puedes acceder.');
           setIsLogin(true);
         } else {
-          // Si el detalle es un objeto (error de validación), lo convertimos a texto
           const errorMessage = typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail);
           Alert.alert('Error', errorMessage || 'Error en el registro');
         }
