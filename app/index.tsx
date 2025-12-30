@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator, Alert, ScrollView } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
-import * as SecureStore from 'expo-secure-store';
 
 const API_URL = 'https://wishpermind-backend.onrender.com';
 
@@ -14,23 +13,13 @@ export default function LoginScreen() {
     const [loading, setLoading] = useState(false);
     const [step, setStep] = useState(1);
 
-    // Esto imprimirá en tu consola F12 para confirmar que es el código nuevo
     useEffect(() => {
-        console.log("SISTEMA WHISPER MIND v2.0 CARGADO");
+        console.log("SISTEMA WHISPER MIND v2.2 - WEB COMPATIBLE");
     }, []);
-
-    const handleNextStep = () => {
-        if (!email || !password) {
-            Alert.alert("Error", "Missing credentials");
-            return;
-        }
-        if (isRegistering) { setStep(2); } else { performLogin(); }
-    };
 
     const performRegister = async () => {
         setLoading(true);
         try {
-            // FORZAMOS EL FORMATO JSON (DICCIONARIO)
             const res = await fetch(`${API_URL}/auth/register`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -42,9 +31,9 @@ export default function LoginScreen() {
                 })
             });
             const data = await res.json();
-            if (!res.ok) throw new Error(data.detail || "Error");
+            if (!res.ok) throw new Error(data.detail || "Reg failed");
             if (data.access_token) {
-                await SecureStore.setItemAsync('user_token', data.access_token);
+                localStorage.setItem('user_token', data.access_token);
                 router.replace('/(tabs)');
             }
         } catch (e: any) {
@@ -55,18 +44,22 @@ export default function LoginScreen() {
     const performLogin = async () => {
         setLoading(true);
         try {
-            const formData = new URLSearchParams();
-            formData.append('username', email.toLowerCase().trim());
-            formData.append('password', password);
+            // 🛠️ FIX 422: Usamos URLSearchParams estricto para OAuth2
+            const params = new URLSearchParams();
+            params.append('username', email.toLowerCase().trim());
+            params.append('password', password);
+
             const res = await fetch(`${API_URL}/auth/login`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                body: formData.toString()
+                body: params.toString()
             });
+
             const data = await res.json();
-            if (!res.ok) throw new Error("Incorrect credentials");
+            if (!res.ok) throw new Error(data.detail || "Login failed");
+
             if (data.access_token) {
-                await SecureStore.setItemAsync('user_token', data.access_token);
+                localStorage.setItem('user_token', data.access_token);
                 router.replace('/(tabs)');
             }
         } catch (e: any) {
@@ -78,25 +71,25 @@ export default function LoginScreen() {
         <View style={styles.container}>
             <LinearGradient colors={['#000000', '#1e293b']} style={StyleSheet.absoluteFill} />
             <View style={styles.content}>
-                <Text style={styles.title}>{step === 1 ? "WHISPER MIND v2.0" : "SAFETY PROTOCOL"}</Text>
+                <Text style={styles.title}>{step === 1 ? "WHISPER MIND v2.2" : "SAFETY PROTOCOL"}</Text>
                 {step === 1 ? (
                     <View>
                         <TextInput placeholder="Email" placeholderTextColor="#64748B" style={styles.input} value={email} onChangeText={setEmail} autoCapitalize="none" />
                         <TextInput placeholder="Password" placeholderTextColor="#64748B" style={styles.input} secureTextEntry value={password} onChangeText={setPassword} />
-                        <TouchableOpacity style={styles.mainBtn} onPress={handleNextStep}>
+                        <TouchableOpacity style={styles.mainBtn} onPress={() => isRegistering ? setStep(2) : performLogin()}>
                             {loading ? <ActivityIndicator color="#000" /> : <Text style={styles.btnText}>{isRegistering ? "CONTINUE" : "ACCESS CORE"}</Text>}
                         </TouchableOpacity>
-                        <TouchableOpacity onPress={() => setIsRegistering(!isRegistering)}>
+                        <TouchableOpacity onPress={() => { setIsRegistering(!isRegistering); setStep(1); }}>
                             <Text style={styles.switchText}>{isRegistering ? "Back to Login" : "Join Network"}</Text>
                         </TouchableOpacity>
                     </View>
                 ) : (
                     <View>
                         <ScrollView style={{maxHeight: 150, marginBottom: 20}}>
-                            <Text style={{color: '#CBD5E1'}}>Whisper Mind is AI support, not medical therapy. [cite: 5]</Text>
+                            <Text style={{color: '#CBD5E1'}}>Protocolo de seguridad: Esta IA no es un médico.</Text>
                         </ScrollView>
                         <TouchableOpacity style={styles.mainBtn} onPress={performRegister}>
-                            <Text style={styles.btnText}>ACCEPT & REGISTER</Text>
+                            {loading ? <ActivityIndicator color="#000" /> : <Text style={styles.btnText}>I ACCEPT & REGISTER</Text>}
                         </TouchableOpacity>
                         <TouchableOpacity onPress={() => setStep(1)}><Text style={styles.switchText}>Go Back</Text></TouchableOpacity>
                     </View>
