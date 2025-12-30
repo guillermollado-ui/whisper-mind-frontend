@@ -14,37 +14,49 @@ export default function LoginScreen() {
     const [step, setStep] = useState(1);
 
     useEffect(() => {
-        console.log("SISTEMA WHISPER MIND v2.2 - WEB COMPATIBLE");
+        console.log("WHISPER MIND v2.4 - PROTOCOLO DE VALIDACIÓN");
     }, []);
 
     const performRegister = async () => {
         setLoading(true);
+        // 🎯 ESTRUCTURA EXACTA QUE PIDE TU BACKEND
+        const payload = {
+            username: email.toLowerCase().trim(),
+            email: email.toLowerCase().trim(),
+            password: password,
+            disclaimer_accepted: true 
+        };
+
         try {
             const res = await fetch(`${API_URL}/auth/register`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ 
-                    username: email.toLowerCase().trim(), 
-                    email: email.toLowerCase().trim(), 
-                    password: password,
-                    disclaimer_accepted: true 
-                })
+                headers: { 
+                    'Accept': 'application/json',
+                    'Content-Type': 'application/json' 
+                },
+                body: JSON.stringify(payload)
             });
+
             const data = await res.json();
-            if (!res.ok) throw new Error(data.detail || "Reg failed");
+            
+            if (!res.ok) {
+                // Si da error 400, aquí veremos exactamente QUÉ campo falta
+                console.error("DETALLE ERROR 400:", data);
+                throw new Error(data.detail || "Error de validación en el registro");
+            }
+
             if (data.access_token) {
-                localStorage.setItem('user_token', data.access_token);
+                window.localStorage.setItem('user_token', data.access_token);
                 router.replace('/(tabs)');
             }
         } catch (e: any) {
-            Alert.alert("Error", e.message);
+            Alert.alert("Aviso del Sistema", e.message);
         } finally { setLoading(false); }
     };
 
     const performLogin = async () => {
         setLoading(true);
         try {
-            // 🛠️ FIX 422: Usamos URLSearchParams estricto para OAuth2
             const params = new URLSearchParams();
             params.append('username', email.toLowerCase().trim());
             params.append('password', password);
@@ -56,14 +68,14 @@ export default function LoginScreen() {
             });
 
             const data = await res.json();
-            if (!res.ok) throw new Error(data.detail || "Login failed");
+            if (!res.ok) throw new Error(data.detail || "Credenciales incorrectas");
 
             if (data.access_token) {
-                localStorage.setItem('user_token', data.access_token);
+                window.localStorage.setItem('user_token', data.access_token);
                 router.replace('/(tabs)');
             }
         } catch (e: any) {
-            Alert.alert("Error", e.message);
+            Alert.alert("Acceso Denegado", e.message);
         } finally { setLoading(false); }
     };
 
@@ -71,7 +83,7 @@ export default function LoginScreen() {
         <View style={styles.container}>
             <LinearGradient colors={['#000000', '#1e293b']} style={StyleSheet.absoluteFill} />
             <View style={styles.content}>
-                <Text style={styles.title}>{step === 1 ? "WHISPER MIND v2.2" : "SAFETY PROTOCOL"}</Text>
+                <Text style={styles.title}>{step === 1 ? "WHISPER MIND v2.4" : "SAFETY PROTOCOL"}</Text>
                 {step === 1 ? (
                     <View>
                         <TextInput placeholder="Email" placeholderTextColor="#64748B" style={styles.input} value={email} onChangeText={setEmail} autoCapitalize="none" />
@@ -86,7 +98,7 @@ export default function LoginScreen() {
                 ) : (
                     <View>
                         <ScrollView style={{maxHeight: 150, marginBottom: 20}}>
-                            <Text style={{color: '#CBD5E1'}}>Protocolo de seguridad: Esta IA no es un médico.</Text>
+                            <Text style={{color: '#CBD5E1'}}>Al unirme, acepto que Whisper Mind es una herramienta de apoyo y no sustituye el consejo médico profesional. [cite: 31, 32]</Text>
                         </ScrollView>
                         <TouchableOpacity style={styles.mainBtn} onPress={performRegister}>
                             {loading ? <ActivityIndicator color="#000" /> : <Text style={styles.btnText}>I ACCEPT & REGISTER</Text>}
