@@ -66,29 +66,42 @@ export default function LoginScreen() {
     };
 
     const performLogin = async () => {
-        setLoading(true);
-        try {
-            const res = await fetch(`${API_URL}/auth/login`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ username: email.toLowerCase(), password: password })
-            });
-            
-            const data = await res.json();
-            
-            if (!res.ok) throw new Error(data.detail || "Login failed");
+    setLoading(true);
+    try {
+        // 🏗️ Preparamos los datos en formato Form Data (lo que pide el estándar de Python)
+        const formData = new URLSearchParams();
+        formData.append('username', email.toLowerCase());
+        formData.append('password', password);
 
-            await SecureStore.setItemAsync('user_token', data.access_token);
+        console.log("Intentando conectar a:", `${API_URL}/auth/login`);
+
+        const res = await fetch(`${API_URL}/auth/login`, {
+            method: 'POST',
+            headers: { 
+                'Content-Type': 'application/x-www-form-urlencoded' // 🔑 Cambio clave aquí
+            },
+            body: formData.toString()
+        });
+        
+        const data = await res.json();
+        
+        if (!res.ok) throw new Error(data.detail || "Login failed");
+
+        // Guardar tokens
+        await SecureStore.setItemAsync('user_token', data.access_token);
+        if (data.plan) {
             await SecureStore.setItemAsync('user_plan', data.plan);
-
-            router.replace('/(tabs)');
-
-        } catch (e: any) {
-            Alert.alert("Login Failed", e.message);
-        } finally {
-            setLoading(false);
         }
-    };
+
+        router.replace('/(tabs)');
+
+    } catch (e: any) {
+        console.error("Error de login:", e);
+        Alert.alert("Login Failed", e.message);
+    } finally {
+        setLoading(false);
+    }
+};
 
     const handleEnterApp = () => {
         setShowWaitlist(false);
