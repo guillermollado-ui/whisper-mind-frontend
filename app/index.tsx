@@ -29,9 +29,12 @@ export default function LoginScreen() {
     const performRegister = async () => {
         setLoading(true);
         try {
+            // Enviamos un JSON limpio para evitar el error model_attributes_type
             const res = await fetch(`${API_URL}/auth/register`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 
+                    'Content-Type': 'application/json' 
+                },
                 body: JSON.stringify({ 
                     username: email.toLowerCase().trim(), 
                     email: email.toLowerCase().trim(), 
@@ -39,8 +42,14 @@ export default function LoginScreen() {
                     disclaimer_accepted: true 
                 })
             });
+
             const data = await res.json();
-            if (!res.ok) throw new Error(data.detail || "Error");
+            
+            if (!res.ok) {
+                const errorMsg = typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail);
+                throw new Error(errorMsg || "Registration failed");
+            }
+
             if (data.access_token) {
                 await SecureStore.setItemAsync('user_token', data.access_token);
                 router.replace('/(tabs)');
@@ -55,16 +64,24 @@ export default function LoginScreen() {
     const performLogin = async () => {
         setLoading(true);
         try {
+            // El Login sí requiere formato de formulario (x-www-form-urlencoded)
             const formData = new URLSearchParams();
             formData.append('username', email.toLowerCase().trim());
             formData.append('password', password);
+
             const res = await fetch(`${API_URL}/auth/login`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
                 body: formData.toString()
             });
+
             const data = await res.json();
-            if (!res.ok) throw new Error("Incorrect credentials");
+            
+            if (!res.ok) {
+                const errorMsg = typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail);
+                throw new Error(errorMsg || "Incorrect credentials");
+            }
+
             if (data.access_token) {
                 await SecureStore.setItemAsync('user_token', data.access_token);
                 router.replace('/(tabs)');
@@ -83,8 +100,22 @@ export default function LoginScreen() {
             {step === 1 ? (
                 <View style={styles.content}>
                     <Text style={styles.title}>WHISPER MIND</Text>
-                    <TextInput placeholder="Email" placeholderTextColor="#64748B" style={styles.input} value={email} onChangeText={setEmail} autoCapitalize="none" />
-                    <TextInput placeholder="Password" placeholderTextColor="#64748B" style={styles.input} secureTextEntry value={password} onChangeText={setPassword} />
+                    <TextInput 
+                        placeholder="Email" 
+                        placeholderTextColor="#64748B" 
+                        style={styles.input} 
+                        value={email} 
+                        onChangeText={setEmail} 
+                        autoCapitalize="none" 
+                    />
+                    <TextInput 
+                        placeholder="Password" 
+                        placeholderTextColor="#64748B" 
+                        style={styles.input} 
+                        secureTextEntry 
+                        value={password} 
+                        onChangeText={setPassword} 
+                    />
                     <TouchableOpacity style={styles.mainBtn} onPress={handleNextStep}>
                         {loading ? <ActivityIndicator color="#000" /> : <Text style={styles.btnText}>{isRegistering ? "CONTINUE" : "ACCESS CORE"}</Text>}
                     </TouchableOpacity>
@@ -101,7 +132,7 @@ export default function LoginScreen() {
                         </Text>
                     </ScrollView>
                     <TouchableOpacity style={styles.mainBtn} onPress={performRegister}>
-                        <Text style={styles.btnText}>I ACCEPT & REGISTER</Text>
+                        {loading ? <ActivityIndicator color="#000" /> : <Text style={styles.btnText}>I ACCEPT & REGISTER</Text>}
                     </TouchableOpacity>
                     <TouchableOpacity onPress={() => setStep(1)}>
                         <Text style={styles.switchText}>Go Back</Text>
