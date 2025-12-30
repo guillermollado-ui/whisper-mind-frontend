@@ -4,6 +4,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
 
+// 🔗 URL DEL BACKEND EN RENDER
 const API_URL = 'https://wishpermind-backend.onrender.com';
 
 export default function LoginScreen() {
@@ -12,7 +13,7 @@ export default function LoginScreen() {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [loading, setLoading] = useState(false);
-    const [step, setStep] = useState(1); // 1: Datos, 2: Disclaimer
+    const [step, setStep] = useState(1); // 1: Credenciales, 2: Disclaimer
 
     const handleNextStep = () => {
         if (!email || !password) {
@@ -20,7 +21,7 @@ export default function LoginScreen() {
             return;
         }
         if (isRegistering) {
-            setStep(2); // Pasamos a la pantalla del Disclaimer
+            setStep(2); // Muestra el Protocolo de Seguridad (Disclaimer)
         } else {
             performLogin();
         }
@@ -29,7 +30,7 @@ export default function LoginScreen() {
     const performRegister = async () => {
         setLoading(true);
         try {
-            // Enviamos un JSON limpio para evitar el error model_attributes_type
+            // 🛠️ FIX: Enviamos JSON puro para evitar el error 'model_attributes_type'
             const res = await fetch(`${API_URL}/auth/register`, {
                 method: 'POST',
                 headers: { 
@@ -39,7 +40,7 @@ export default function LoginScreen() {
                     username: email.toLowerCase().trim(), 
                     email: email.toLowerCase().trim(), 
                     password: password,
-                    disclaimer_accepted: true 
+                    disclaimer_accepted: true // 🔐 Requisito legal del Backend
                 })
             });
 
@@ -52,7 +53,7 @@ export default function LoginScreen() {
 
             if (data.access_token) {
                 await SecureStore.setItemAsync('user_token', data.access_token);
-                router.replace('/(tabs)');
+                router.replace('/(tabs)'); // 🚀 Acceso directo al Módulo 1: Nexus
             }
         } catch (e: any) {
             Alert.alert("Error", e.message);
@@ -64,7 +65,7 @@ export default function LoginScreen() {
     const performLogin = async () => {
         setLoading(true);
         try {
-            // El Login sí requiere formato de formulario (x-www-form-urlencoded)
+            // 🛡️ El Login usa Form Data (estándar OAuth2 de FastAPI)
             const formData = new URLSearchParams();
             formData.append('username', email.toLowerCase().trim());
             formData.append('password', password);
@@ -78,8 +79,7 @@ export default function LoginScreen() {
             const data = await res.json();
             
             if (!res.ok) {
-                const errorMsg = typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail);
-                throw new Error(errorMsg || "Incorrect credentials");
+                throw new Error("Incorrect credentials or unauthorized access");
             }
 
             if (data.access_token) {
@@ -87,7 +87,7 @@ export default function LoginScreen() {
                 router.replace('/(tabs)');
             }
         } catch (e: any) {
-            Alert.alert("Error", e.message);
+            Alert.alert("Login Failed", e.message);
         } finally {
             setLoading(false);
         }
@@ -101,7 +101,7 @@ export default function LoginScreen() {
                 <View style={styles.content}>
                     <Text style={styles.title}>WHISPER MIND</Text>
                     <TextInput 
-                        placeholder="Email" 
+                        placeholder="Neural ID (Email)" 
                         placeholderTextColor="#64748B" 
                         style={styles.input} 
                         value={email} 
@@ -109,7 +109,7 @@ export default function LoginScreen() {
                         autoCapitalize="none" 
                     />
                     <TextInput 
-                        placeholder="Password" 
+                        placeholder="Access Code" 
                         placeholderTextColor="#64748B" 
                         style={styles.input} 
                         secureTextEntry 
@@ -120,7 +120,7 @@ export default function LoginScreen() {
                         {loading ? <ActivityIndicator color="#000" /> : <Text style={styles.btnText}>{isRegistering ? "CONTINUE" : "ACCESS CORE"}</Text>}
                     </TouchableOpacity>
                     <TouchableOpacity onPress={() => setIsRegistering(!isRegistering)}>
-                        <Text style={styles.switchText}>{isRegistering ? "Already have a link? Login" : "New consciousness? Join Network"}</Text>
+                        <Text style={styles.switchText}>{isRegistering ? "Back to Login" : "New consciousness? Join Network"}</Text>
                     </TouchableOpacity>
                 </View>
             ) : (
@@ -128,10 +128,11 @@ export default function LoginScreen() {
                     <Text style={styles.title}>SAFETY PROTOCOL</Text>
                     <ScrollView style={{maxHeight: 200, marginVertical: 20}}>
                         <Text style={{color: '#CBD5E1', lineHeight: 22}}>
-                            Whisper Mind is an AI for emotional support. It is NOT a medical device. By clicking ACCEPT, you acknowledge this is not therapy.
+                            Whisper Mind is an AI for emotional support[cite: 5]. It is NOT a medical device[cite: 31]. 
+                            By clicking ACCEPT, you acknowledge this is not professional therapy[cite: 12].
                         </Text>
                     </ScrollView>
-                    <TouchableOpacity style={styles.mainBtn} onPress={performRegister}>
+                    <TouchableOpacity style={styles.mainBtn} onPress={performRegister} disabled={loading}>
                         {loading ? <ActivityIndicator color="#000" /> : <Text style={styles.btnText}>I ACCEPT & REGISTER</Text>}
                     </TouchableOpacity>
                     <TouchableOpacity onPress={() => setStep(1)}>
@@ -146,9 +147,9 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#000' },
     content: { flex: 1, justifyContent: 'center', padding: 40 },
-    title: { fontSize: 28, fontWeight: '900', color: 'white', textAlign: 'center', marginBottom: 40 },
-    input: { backgroundColor: '#1e293b', borderRadius: 12, padding: 15, color: 'white', marginBottom: 15 },
-    mainBtn: { backgroundColor: '#38BDF8', padding: 18, borderRadius: 12, alignItems: 'center' },
-    btnText: { fontWeight: 'bold', color: '#000', letterSpacing: 1 },
-    switchText: { color: '#94A3B8', textAlign: 'center', marginTop: 20 }
+    title: { fontSize: 28, fontWeight: '900', color: 'white', textAlign: 'center', marginBottom: 40, letterSpacing: 2 },
+    input: { backgroundColor: '#1e293b', borderRadius: 12, padding: 15, color: 'white', marginBottom: 15, borderWidth: 1, borderColor: '#334155' },
+    mainBtn: { backgroundColor: '#38BDF8', padding: 18, borderRadius: 12, alignItems: 'center', shadowColor: '#38BDF8', shadowOpacity: 0.3, shadowRadius: 10 },
+    btnText: { fontWeight: 'bold', color: '#0f172a', letterSpacing: 1 },
+    switchText: { color: '#94A3B8', textAlign: 'center', marginTop: 25, fontSize: 13 }
 });
