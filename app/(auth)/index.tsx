@@ -32,14 +32,17 @@ export default function AuthScreen() {
 
     try {
       if (isLogin) {
-        // --- LÓGICA DE LOGIN (Format: Form URL Encoded) ---
+        // --- LÓGICA DE LOGIN ---
         const params = new URLSearchParams();
         params.append('username', username.toLowerCase().trim());
         params.append('password', password);
 
         const response = await fetch(`${API_URL}/auth/login`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          headers: { 
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'Accept': 'application/json'
+          },
           body: params.toString(),
         });
 
@@ -54,16 +57,21 @@ export default function AuthScreen() {
         }
 
       } else {
-        // --- LÓGICA DE REGISTRO (Format: JSON + Disclaimer) ---
+        // --- 🛠️ LÓGICA DE REGISTRO REFORZADA ---
+        const registrationBody = { 
+            username: username.toLowerCase().trim(), 
+            email: username.toLowerCase().trim(), 
+            password: password,
+            disclaimer_accepted: true 
+        };
+
         const response = await fetch(`${API_URL}/auth/register`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ 
-            username: username.toLowerCase().trim(), 
-            email: username.toLowerCase().trim(), // Usamos el username como email para el registro
-            password: password,
-            disclaimer_accepted: true // 🔐 Indispensable para el Backend
-          }),
+          headers: { 
+            'Content-Type': 'application/json',
+            'Accept': 'application/json' 
+          },
+          body: JSON.stringify(registrationBody),
         });
 
         const data = await response.json();
@@ -72,7 +80,9 @@ export default function AuthScreen() {
           Alert.alert('Éxito', 'Consciencia creada. Ahora puedes acceder.');
           setIsLogin(true);
         } else {
-          Alert.alert('Error', data.detail || 'Error en el registro');
+          // Si el detalle es un objeto (error de validación), lo convertimos a texto
+          const errorMessage = typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail);
+          Alert.alert('Error', errorMessage || 'Error en el registro');
         }
       }
     } catch (error) {
