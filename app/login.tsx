@@ -15,7 +15,6 @@ export default function LoginScreen() {
     const [password, setPassword] = useState('');
     const [loading, setLoading] = useState(false);
     
-    // MODALES
     const [showDisclaimer, setShowDisclaimer] = useState(false);
     const [showWaitlist, setShowWaitlist] = useState(false);
     const [agreed, setAgreed] = useState(false);
@@ -25,7 +24,6 @@ export default function LoginScreen() {
             Alert.alert("Error", "Please enter credentials.");
             return;
         }
-
         if (isRegistering) {
             setShowDisclaimer(true);
         } else {
@@ -36,25 +34,26 @@ export default function LoginScreen() {
     const performRegister = async () => {
         setLoading(true);
         try {
-            // El registro suele ser JSON, pero muy estricto con los campos
+            console.log("Intentando Registro en:", `${API_URL}/auth/register`);
             const res = await fetch(`${API_URL}/auth/register`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ 
                     username: email.toLowerCase(), 
+                    email: email.toLowerCase(), // Enviamos ambos por seguridad
                     password: password 
-                    // Hemos quitado disclaimer_accepted temporalmente para asegurar compatibilidad
                 })
             });
             
             const data = await res.json();
             
             if (!res.ok) {
-                console.error("Detalle error registro:", data);
-                throw new Error(data.detail || "Registration failed");
+                console.error("DETALLE ERROR REGISTRO:", data);
+                // Si el error viene de FastAPI, suele estar en data.detail
+                const errorMsg = typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail);
+                throw new Error(errorMsg || "Registration failed");
             }
 
-            // Si el registro devuelve token directamente:
             if (data.access_token) {
                 await SecureStore.setItemAsync('user_token', data.access_token);
                 if (data.plan) await SecureStore.setItemAsync('user_plan', data.plan);
@@ -64,7 +63,8 @@ export default function LoginScreen() {
             setShowWaitlist(true);
 
         } catch (e: any) {
-            Alert.alert("Access Denied", e.message);
+            console.error("Error capturado:", e.message);
+            Alert.alert("Registration Denied", e.message);
         } finally {
             setLoading(false);
         }
@@ -73,24 +73,23 @@ export default function LoginScreen() {
     const performLogin = async () => {
         setLoading(true);
         try {
-            // FastAPI/Python requiere x-www-form-urlencoded para el login estándar
+            console.log("Intentando Login en:", `${API_URL}/auth/login`);
             const formData = new URLSearchParams();
             formData.append('username', email.toLowerCase());
             formData.append('password', password);
 
             const res = await fetch(`${API_URL}/auth/login`, {
                 method: 'POST',
-                headers: { 
-                    'Content-Type': 'application/x-www-form-urlencoded' 
-                },
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
                 body: formData.toString()
             });
             
             const data = await res.json();
             
             if (!res.ok) {
-                console.error("Detalle error login:", data);
-                throw new Error(data.detail || "Login failed");
+                console.error("DETALLE ERROR LOGIN:", data);
+                const errorMsg = typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail);
+                throw new Error(errorMsg || "Login failed");
             }
 
             if (data.access_token) {
@@ -116,9 +115,7 @@ export default function LoginScreen() {
     return (
         <View style={styles.container}>
             <LinearGradient colors={['#000000', '#1e293b']} style={StyleSheet.absoluteFill} />
-            
             <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.content}>
-                
                 <View style={styles.header}>
                     <View style={styles.logoOrb}>
                         <Ionicons name="planet-outline" size={40} color="#38BDF8" />
@@ -139,7 +136,6 @@ export default function LoginScreen() {
                             onChangeText={setEmail}
                         />
                     </View>
-
                     <View style={styles.inputContainer}>
                         <Ionicons name="lock-closed-outline" size={20} color="#64748B" style={styles.inputIcon} />
                         <TextInput 
@@ -151,7 +147,6 @@ export default function LoginScreen() {
                             onChangeText={setPassword}
                         />
                     </View>
-
                     <TouchableOpacity style={styles.mainBtn} onPress={handleAuthAction} disabled={loading}>
                         {loading ? <ActivityIndicator color="#000" /> : (
                             <Text style={styles.btnText}>
@@ -159,7 +154,6 @@ export default function LoginScreen() {
                             </Text>
                         )}
                     </TouchableOpacity>
-
                     <TouchableOpacity onPress={() => setIsRegistering(!isRegistering)} style={styles.switchBtn}>
                         <Text style={styles.switchText}>
                             {isRegistering ? "Already have a link? Access Core" : "New consciousness? Join Network"}
@@ -168,7 +162,6 @@ export default function LoginScreen() {
                 </View>
             </KeyboardAvoidingView>
 
-            {/* MODAL SAFETY PROTOCOL */}
             <Modal visible={showDisclaimer} transparent animationType="slide">
                 <View style={styles.modalOverlay}>
                     <View style={styles.modalBox}>
@@ -176,63 +169,36 @@ export default function LoginScreen() {
                             <Ionicons name="warning" size={30} color="#F59E0B" />
                             <Text style={styles.modalTitle}>SAFETY PROTOCOL</Text>
                         </View>
-                        
                         <ScrollView style={styles.disclaimerScroll}>
                             <Text style={styles.disclaimerText}>
                                 <Text style={{fontWeight: 'bold', color: 'white'}}>MEDICAL DISCLAIMER & SAFETY WARNING{'\n\n'}</Text>
-                                Whisper Mind is an Artificial Intelligence designed for emotional support and coaching.
-                                <Text style={{fontWeight: 'bold', color: '#EF4444'}}> It is NOT a medical device or licensed therapist.{'\n\n'}</Text>
-                                By continuing, you acknowledge that you are responsible for your own mental health.
+                                Whisper Mind is an AI for emotional support. It is NOT a medical device.
                             </Text>
                         </ScrollView>
-
-                        <TouchableOpacity 
-                            style={[styles.checkboxRow, agreed && styles.checkboxActive]} 
-                            onPress={() => setAgreed(!agreed)}
-                        >
+                        <TouchableOpacity style={[styles.checkboxRow, agreed && styles.checkboxActive]} onPress={() => setAgreed(!agreed)}>
                             <Ionicons name={agreed ? "checkbox" : "square-outline"} size={24} color={agreed ? "#38BDF8" : "#64748B"} />
-                            <Text style={styles.agreeText}>I have read and understand these terms.</Text>
+                            <Text style={styles.agreeText}>I understand these terms.</Text>
                         </TouchableOpacity>
-
                         <View style={styles.modalActions}>
-                            <TouchableOpacity style={styles.cancelBtn} onPress={() => setShowDisclaimer(false)}>
-                                <Text style={styles.cancelText}>DECLINE</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity 
-                                style={[styles.acceptBtn, !agreed && {opacity: 0.5}]} 
-                                disabled={!agreed || loading}
-                                onPress={performRegister}
-                            >
-                                {loading ? <ActivityIndicator color="#000" /> : <Text style={styles.acceptText}>ACCEPT & ENTER</Text>}
+                            <TouchableOpacity style={styles.cancelBtn} onPress={() => setShowDisclaimer(false)}><Text style={styles.cancelText}>DECLINE</Text></TouchableOpacity>
+                            <TouchableOpacity style={[styles.acceptBtn, !agreed && {opacity: 0.5}]} disabled={!agreed || loading} onPress={performRegister}>
+                                {loading ? <ActivityIndicator color="#000" /> : <Text style={styles.acceptText}>ACCEPT</Text>}
                             </TouchableOpacity>
                         </View>
                     </View>
                 </View>
             </Modal>
 
-            {/* MODAL WAITLIST */}
             <Modal visible={showWaitlist} transparent animationType="fade">
                 <View style={styles.modalOverlay}>
                     <View style={[styles.modalBox, { borderColor: '#38BDF8' }]}>
-                        <View style={{alignItems: 'center', marginBottom: 20}}>
-                            <Ionicons name="people-circle-outline" size={50} color="#38BDF8" />
-                            <Text style={[styles.modalTitle, { color: '#38BDF8', marginTop: 10 }]}>WELCOME TO THE QUEUE</Text>
-                        </View>
-                        
-                        <Text style={[styles.disclaimerText, { textAlign: 'center', marginBottom: 30 }]}>
-                            You have been added to the Waitlist.{'\n\n'}
-                            Access is limited to ensure neural quality.
-                        </Text>
-
+                        <Text style={[styles.modalTitle, { color: '#38BDF8', textAlign: 'center' }]}>WELCOME TO THE QUEUE</Text>
+                        <Text style={[styles.disclaimerText, { textAlign: 'center', marginVertical: 20 }]}>You have been added to the Waitlist.</Text>
                         <TouchableOpacity style={styles.founderBtn} onPress={handleEnterApp}>
                             <LinearGradient colors={['#F59E0B', '#D97706']} style={StyleSheet.absoluteFill} start={{x:0, y:0}} end={{x:1, y:1}} />
                             <Text style={styles.founderText}>BECOME FOUNDER (29€)</Text>
-                            <Text style={styles.founderSub}>Skip the line & Lifetime Access</Text>
                         </TouchableOpacity>
-
-                        <TouchableOpacity style={styles.waitBtn} onPress={handleEnterApp}>
-                            <Text style={styles.waitText}>Stay in Waitlist (Limited)</Text>
-                        </TouchableOpacity>
+                        <TouchableOpacity style={styles.waitBtn} onPress={handleEnterApp}><Text style={styles.waitText}>Stay in Waitlist</Text></TouchableOpacity>
                     </View>
                 </View>
             </Modal>
@@ -256,10 +222,10 @@ const styles = StyleSheet.create({
     switchBtn: { alignItems: 'center', marginTop: 20 },
     switchText: { color: '#94A3B8', fontSize: 14 },
     modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.95)', justifyContent: 'center', padding: 20 },
-    modalBox: { backgroundColor: '#0f172a', borderRadius: 20, padding: 25, borderWidth: 1, borderColor: '#F59E0B', maxHeight: '80%' },
+    modalBox: { backgroundColor: '#0f172a', borderRadius: 20, padding: 25, borderWidth: 1, borderColor: '#F59E0B' },
     modalHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 20 },
     modalTitle: { color: '#F59E0B', fontSize: 18, fontWeight: 'bold' },
-    disclaimerScroll: { maxHeight: 300, marginBottom: 20 },
+    disclaimerScroll: { maxHeight: 200, marginBottom: 20 },
     disclaimerText: { color: '#CBD5E1', lineHeight: 22, fontSize: 14 },
     checkboxRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 25, padding: 10 },
     checkboxActive: { backgroundColor: 'rgba(56, 189, 248, 0.1)' },
@@ -271,7 +237,6 @@ const styles = StyleSheet.create({
     acceptText: { color: '#000', fontWeight: 'bold' },
     founderBtn: { height: 60, borderRadius: 12, justifyContent: 'center', alignItems: 'center', overflow: 'hidden', marginBottom: 15 },
     founderText: { color: 'white', fontWeight: '900', fontSize: 16 },
-    founderSub: { color: 'rgba(255,255,255,0.8)', fontSize: 10 },
     waitBtn: { padding: 15, alignItems: 'center' },
     waitText: { color: '#64748B', textDecorationLine: 'underline' }
 });
