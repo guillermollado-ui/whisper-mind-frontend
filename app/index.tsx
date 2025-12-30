@@ -3,7 +3,6 @@ import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator,
 import { useRouter } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
 
-// TU SERVIDOR
 const API_URL = 'https://wishpermind-backend.onrender.com';
 
 export default function AuthScreen() {
@@ -13,7 +12,6 @@ export default function AuthScreen() {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // 🔑 FUNCIÓN PARA GUARDAR LA LLAVE EN CUALQUIER DISPOSITIVO
   const saveToken = async (token: string) => {
     if (Platform.OS === 'web') {
       localStorage.setItem('user_token', token);
@@ -32,31 +30,25 @@ export default function AuthScreen() {
 
     try {
       if (isLogin) {
-        // --- 🛠️ LÓGICA DE LOGIN BLINDADA (OAuth2 Form Data) ---
-        const details: any = {
-          'username': username.toLowerCase().trim(),
-          'password': password,
-          'grant_type': 'password', // Estándar OAuth2 que a veces FastAPI requiere
-        };
+        // --- 🛠️ LOGIN CON FORMDATA (Cura definitiva para el 422) ---
+        const formData = new FormData();
+        formData.append('username', username.toLowerCase().trim());
+        formData.append('password', password);
 
-        const formBody = Object.keys(details)
-          .map(key => encodeURIComponent(key) + '=' + encodeURIComponent(details[key]))
-          .join('&');
-
+        // NOTA: Con FormData NO debemos poner 'Content-Type' manualmente, 
+        // el navegador lo hace solo con el "boundary" correcto.
         const response = await fetch(`${API_URL}/auth/login`, {
           method: 'POST',
           headers: { 
-            'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
             'Accept': 'application/json'
           },
-          body: formBody,
+          body: formData,
         });
 
         const data = await response.json();
 
         if (response.ok && data.access_token) {
           await saveToken(data.access_token);
-          console.log("Login exitoso. Entrando...");
           router.replace('/(tabs)'); 
         } else {
           const errorMsg = data.detail || 'Credenciales incorrectas';
@@ -64,36 +56,31 @@ export default function AuthScreen() {
         }
 
       } else {
-        // --- LÓGICA DE REGISTRO REFORZADA ---
-        const registrationBody = { 
-            username: username.toLowerCase().trim(), 
-            email: username.toLowerCase().trim(), 
-            password: password,
-            disclaimer_accepted: true 
-        };
-
+        // --- REGISTRO CON JSON (Se mantiene igual) ---
         const response = await fetch(`${API_URL}/auth/register`, {
           method: 'POST',
           headers: { 
             'Content-Type': 'application/json',
             'Accept': 'application/json' 
           },
-          body: JSON.stringify(registrationBody),
+          body: JSON.stringify({ 
+            username: username.toLowerCase().trim(), 
+            email: username.toLowerCase().trim(), 
+            password: password,
+            disclaimer_accepted: true 
+          }),
         });
 
         const data = await response.json();
-
         if (response.ok) {
           Alert.alert('Éxito', 'Consciencia creada. Ahora puedes acceder.');
           setIsLogin(true);
         } else {
-          const errorMessage = typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail);
-          Alert.alert('Error', errorMessage || 'Error en el registro');
+          Alert.alert('Error', JSON.stringify(data.detail) || 'Error en el registro');
         }
       }
     } catch (error) {
       Alert.alert('Error de Conexión', 'No se pudo contactar con el servidor.');
-      console.error(error);
     } finally {
       setLoading(false);
     }
@@ -103,7 +90,6 @@ export default function AuthScreen() {
     <View style={styles.container}>
       <Text style={styles.title}>Whisper Mind</Text>
       <Text style={styles.subtitle}>{isLogin ? 'Iniciar Sesión' : 'Crear Cuenta'}</Text>
-
       <View style={styles.inputContainer}>
         <TextInput
           placeholder="Usuario (Email)"
@@ -122,23 +108,11 @@ export default function AuthScreen() {
           secureTextEntry
         />
       </View>
-
-      <TouchableOpacity 
-        style={styles.button} 
-        onPress={handleAuth}
-        disabled={loading}
-      >
-        {loading ? (
-          <ActivityIndicator color="#0F172A" />
-        ) : (
-          <Text style={styles.buttonText}>{isLogin ? 'ENTRAR' : 'REGISTRARSE'}</Text>
-        )}
+      <TouchableOpacity style={styles.button} onPress={handleAuth} disabled={loading}>
+        {loading ? <ActivityIndicator color="#0F172A" /> : <Text style={styles.buttonText}>{isLogin ? 'ENTRAR' : 'REGISTRARSE'}</Text>}
       </TouchableOpacity>
-
       <TouchableOpacity onPress={() => setIsLogin(!isLogin)} style={styles.switchButton}>
-        <Text style={styles.switchText}>
-          {isLogin ? '¿No tienes cuenta? Regístrate' : '¿Ya tienes cuenta? Entra'}
-        </Text>
+        <Text style={styles.switchText}>{isLogin ? '¿No tienes cuenta? Regístrate' : '¿Ya tienes cuenta? Entra'}</Text>
       </TouchableOpacity>
     </View>
   );
