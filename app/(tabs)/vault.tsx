@@ -1,14 +1,14 @@
 import { useState, useEffect, useCallback } from 'react';
-import { View, Text, StyleSheet, ScrollView, Image, ActivityIndicator, RefreshControl, Dimensions } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Image, ActivityIndicator, RefreshControl, Platform } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from 'expo-router';
+import * as SecureStore from 'expo-secure-store';
 
 // ⚠️ URL DE RENDER
 const API_URL = 'https://wishpermind-backend.onrender.com';
-const SESSION_ID = 'user-premium-1';
+const SESSION_ID = 'user-premium-1'; // Esto se volverá dinámico con el token
 
-// 🔮 ARQUETIPOS DINÁMICOS (Identity Evolution)
 const ARCHETYPES = [
     { limit: 0, title: "Echo Wanderer", icon: "footsteps-outline", color: "#94A3B8", desc: "Beginning the journey inward." },
     { limit: 3, title: "Mind Gardner", icon: "leaf-outline", color: "#10B981", desc: "Cultivating first insights." },
@@ -22,14 +22,31 @@ export default function VaultScreen() {
     const [refreshing, setRefreshing] = useState(false);
     const [currentArchetype, setCurrentArchetype] = useState(ARCHETYPES[0]);
 
+    // 🔑 FUNCIÓN HÍBRIDA PARA EL TOKEN
+    const getAuthToken = async () => {
+        if (Platform.OS === 'web') {
+            return localStorage.getItem('user_token');
+        } else {
+            return await SecureStore.getItemAsync('user_token');
+        }
+    };
+
     const fetchVault = async () => {
         try {
-            const res = await fetch(`${API_URL}/vault/${SESSION_ID}`);
+            const token = await getAuthToken();
+            const res = await fetch(`${API_URL}/vault/${SESSION_ID}`, {
+                headers: {
+                    'Authorization': `Bearer ${token}`
+                }
+            });
             const data = await res.json();
-            setSessions(data);
-            determineArchetype(data.length);
+            
+            if (res.ok) {
+                setSessions(data);
+                determineArchetype(data.length);
+            }
         } catch (e) {
-            console.error(e);
+            console.error("Error cargando la bóveda:", e);
         } finally {
             setLoading(false);
             setRefreshing(false);
@@ -52,9 +69,9 @@ export default function VaultScreen() {
     }, []);
 
     const getMoodColor = (score: number) => {
-        if (score >= 8) return '#10B981'; // Green
-        if (score >= 5) return '#F59E0B'; // Yellow
-        return '#EF4444'; // Red
+        if (score >= 8) return '#10B981'; 
+        if (score >= 5) return '#F59E0B'; 
+        return '#EF4444'; 
     };
 
     return (
@@ -70,7 +87,6 @@ export default function VaultScreen() {
                 contentContainerStyle={styles.scrollContent}
                 refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#fff" />}
             >
-                {/* 🆔 IDENTITY CARD (Visualización del Arquetipo) */}
                 {!loading && (
                     <LinearGradient colors={['rgba(30, 41, 59, 0.8)', 'rgba(15, 23, 42, 0.8)']} style={styles.archetypeCard}>
                         <View style={styles.archHeader}>
@@ -97,7 +113,6 @@ export default function VaultScreen() {
                         
                         return (
                             <View key={index} style={styles.card}>
-                                {/* Cabecera de la Tarjeta */}
                                 <View style={styles.cardHeader}>
                                     <View style={styles.tagContainer}>
                                         <View style={[styles.moodDot, { backgroundColor: getMoodColor(bp.mood_score) }]} />
@@ -106,11 +121,9 @@ export default function VaultScreen() {
                                     <Text style={styles.date}>{item.timestamp || 'Recent'}</Text>
                                 </View>
 
-                                {/* Título e Insight */}
                                 <Text style={styles.cardTitle}>{bp.title}</Text>
                                 <Text style={styles.goldenNugget}>"{bp.golden_nugget}"</Text>
 
-                                {/* 🎨 SI ES SUEÑO: Mostrar Arte */}
                                 {isDream && bp.image && (
                                     <View style={styles.imageContainer}>
                                         <Image source={{ uri: `data:image/png;base64,${bp.image}` }} style={styles.dreamImage} />
@@ -121,7 +134,6 @@ export default function VaultScreen() {
                                     </View>
                                 )}
 
-                                {/* Acción sugerida */}
                                 <View style={styles.footer}>
                                     <Ionicons name="arrow-forward-circle-outline" size={20} color="#64748B" />
                                     <Text style={styles.actionItem}>{bp.action_item}</Text>
@@ -142,10 +154,7 @@ const styles = StyleSheet.create({
     header: { marginTop: 60, paddingHorizontal: 20, marginBottom: 20 },
     headerTitle: { fontSize: 28, fontWeight: '900', color: 'white', letterSpacing: 1 },
     headerSubtitle: { fontSize: 10, color: '#64748B', letterSpacing: 3, marginTop: 5 },
-    
     scrollContent: { paddingHorizontal: 20 },
-
-    // ARCHETYPE CARD
     archetypeCard: { padding: 20, borderRadius: 20, marginBottom: 30, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
     archHeader: { flexDirection: 'row', alignItems: 'center' },
     archTitle: { fontSize: 18, fontWeight: 'bold', letterSpacing: 1 },
@@ -154,24 +163,18 @@ const styles = StyleSheet.create({
     progressBar: { height: 4, backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 2, marginTop: 15, overflow: 'hidden' },
     progressFill: { height: '100%' },
     statsText: { color: '#64748B', fontSize: 10, marginTop: 8, textAlign: 'right' },
-
-    // SESSION CARD
     card: { backgroundColor: '#1e293b', borderRadius: 16, padding: 20, marginBottom: 15, borderWidth: 1, borderColor: '#334155' },
     cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
     tagContainer: { flexDirection: 'row', alignItems: 'center', gap: 8 },
     moodDot: { width: 8, height: 8, borderRadius: 4 },
     category: { color: '#94A3B8', fontSize: 12, fontWeight: 'bold', textTransform: 'uppercase' },
     date: { color: '#64748B', fontSize: 10 },
-    
     cardTitle: { color: 'white', fontSize: 18, fontWeight: 'bold', marginBottom: 8 },
     goldenNugget: { color: '#E2E8F0', fontSize: 15, fontStyle: 'italic', lineHeight: 22, marginBottom: 15 },
-    
-    // DREAM IMAGE
     imageContainer: { marginTop: 10, marginBottom: 15, borderRadius: 10, overflow: 'hidden', position: 'relative' },
     dreamImage: { width: '100%', height: 200, borderRadius: 10 },
     imageOverlay: { position: 'absolute', bottom: 10, left: 10, flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: 'rgba(0,0,0,0.6)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 5 },
     imageTag: { color: 'white', fontSize: 10, fontWeight: 'bold' },
-
     footer: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingTop: 15, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.1)' },
     actionItem: { color: '#94A3B8', fontSize: 12, flex: 1 },
 });
