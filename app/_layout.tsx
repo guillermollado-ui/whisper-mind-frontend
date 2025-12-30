@@ -17,17 +17,17 @@ export default function RootLayout() {
 
     const checkAuth = () => {
       try {
-        // 🌐 Usamos localStorage para que funcione en la WEB de Render
-        const token = localStorage.getItem('user_token');
-        const isAtLogin = segments.length === 0 || segments[0] === 'index';
+        // 🌐 WEB-ONLY: Usamos localStorage directamente
+        const token = typeof window !== 'undefined' ? window.localStorage.getItem('user_token') : null;
+        const inAuthGroup = segments.length === 0 || segments[0] === 'index' || segments[0] === '(auth)';
 
-        if (!token && !isAtLogin) {
+        if (!token && !inAuthGroup) {
           router.replace('/');
-        } else if (token && isAtLogin) {
+        } else if (token && inAuthGroup) {
           router.replace('/(tabs)');
         }
       } catch (e) {
-        console.log("Error en el control de acceso:", e);
+        console.log("Error de protección de rutas:", e);
       } finally {
         setCheckingAuth(false);
       }
