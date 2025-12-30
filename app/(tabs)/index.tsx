@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Animated, Easing, Modal, Platform } from 'react-native'; // ⚠️ BORRADO 'Alert' para evitar errores
+import { View, Text, StyleSheet, TouchableOpacity, Animated, Easing, Modal, Platform, ActivityIndicator } from 'react-native'; 
 import { Audio } from 'expo-av';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -60,14 +60,21 @@ export default function NexusScreen() {
   const [alertVisible, setAlertVisible] = useState(false);
   const [alertConfig, setAlertConfig] = useState({ title: '', body: '', type: 'success' });
   
-  // 🔴 ESTADO DEL MODAL DE LOGOUT
   const [logoutVisible, setLogoutVisible] = useState(false);
 
   const soundRef = useRef<Audio.Sound | null>(null);
   const thinkingSoundRef = useRef<Audio.Sound | null>(null);
   const pulseAnim = useRef(new Animated.Value(1)).current; 
 
-  // --- AUDIO SETUP ---
+  // --- 🔑 UNIVERSAL TOKEN GETTER ---
+  const getAuthToken = async () => {
+    if (Platform.OS === 'web') {
+      return localStorage.getItem('user_token');
+    } else {
+      return await SecureStore.getItemAsync('user_token');
+    }
+  };
+
   useEffect(() => {
     async function setupAudio() {
       try {
@@ -87,21 +94,23 @@ export default function NexusScreen() {
   useFocusEffect(useCallback(() => { return () => stopSpeaking(); }, []));
 
   const stopSpeaking = async () => {
-    if (soundRef.current) { await soundRef.current.stopAsync(); await soundRef.current.unloadAsync(); soundRef.current = null; }
+    if (soundRef.current) { try { await soundRef.current.stopAsync(); await soundRef.current.unloadAsync(); } catch (e) {} soundRef.current = null; }
     setAiSpeaking(false);
   };
 
-  // 🔴 1. FUNCIÓN QUE ABRE EL MODAL (NO USA ALERT)
   const handleLogoutPress = () => {
       setLogoutVisible(true); 
   };
 
-  // 🔴 2. FUNCIÓN QUE EJECUTA LA DESCONEXIÓN
   const confirmLogout = async () => {
-      setLogoutVisible(false); // Cierra el modal
+      setLogoutVisible(false);
       if (aiSpeaking) await stopSpeaking();
-      await SecureStore.deleteItemAsync('user_token');
-      router.replace('/login');
+      if (Platform.OS === 'web') {
+        localStorage.removeItem('user_token');
+      } else {
+        await SecureStore.deleteItemAsync('user_token');
+      }
+      router.replace('/');
   };
 
   useEffect(() => {
@@ -120,22 +129,33 @@ export default function NexusScreen() {
   const triggerMorningProtocol = async () => {
     setAiThinking(true);
     try {
-      const res = await fetch(`${API_URL}/chat/morning`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: "WAKE UP", mode: "morning", session_id: SESSION_ID }) });
+      const token = await getAuthToken();
+      const res = await fetch(`${API_URL}/chat/morning`, { 
+        method: 'POST', 
+        headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}` 
+        }, 
+        body: JSON.stringify({ text: "WAKE UP", mode: "morning", session_id: SESSION_ID }) 
+      });
       const data = await res.json();
       if (data.audio) await playResponse(data.audio);
     } catch (e) { showCyberAlert("Error", "Offline", "error"); } finally { setAiThinking(false); }
   };
 
-  // 😶 FEATURE: SILENT CHECK-IN
   const triggerSilentCheckIn = async () => {
       if (aiSpeaking) await stopSpeaking();
       setAiThinking(true);
       showCyberAlert("Just Be Mode", "Generating comfort field...", "success");
 
       try {
+          const token = await getAuthToken();
           const res = await fetch(`${API_URL}/chat/morning`, { 
               method: 'POST', 
-              headers: { 'Content-Type': 'application/json' }, 
+              headers: { 
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${token}` 
+              }, 
               body: JSON.stringify({ 
                   text: "I don't want to talk right now. I just need support.", 
                   mode: "silent_comfort", 
@@ -193,11 +213,19 @@ export default function NexusScreen() {
 
   async function sendAudioToBackend(uri: string) {
     try {
+      const token = await getAuthToken();
       const formData = new FormData();
+      // Ajuste universal para FormData
       formData.append('file', { uri, name: 'voice.m4a', type: 'audio/m4a' } as any);
       formData.append('session_id', SESSION_ID);
       formData.append('mode', currentMode.id); 
-      const res = await fetch(`${API_URL}/chat/voice`, { method: 'POST', body: formData });
+      const res = await fetch(`${API_URL}/chat/voice`, { 
+        method: 'POST', 
+        headers: {
+            'Authorization': `Bearer ${token}`
+        },
+        body: formData 
+      });
       const data = await res.json();
       if (data.audio) playResponse(data.audio);
     } catch (e) { showCyberAlert("Network Error", "Retry.", "error"); } finally { setAiThinking(false); }
@@ -231,7 +259,6 @@ export default function NexusScreen() {
             <Text style={styles.modeDesc}>{currentMode.desc}</Text>
         </View>
 
-        {/* 🔴 CONTROLES SUPERIORES */}
         <View style={{flexDirection: 'row', gap: 15}}>
              <TouchableOpacity style={styles.alarmBtn} onPress={handleLogoutPress}>
                 <Ionicons name="power-outline" size={20} color="#EF4444" />
@@ -257,7 +284,7 @@ export default function NexusScreen() {
         </Animated.View>
         
         <Text style={styles.statusText}>
-          {aiThinking ? "Analysing Consciousness..." : aiSpeaking ? "Listening to Alice..." : isRecording ? "Recording..." : "Touch mic to speak"}
+          {aiThinking ? "Analysing Consciousness..." : aiSpeaking ? "Broadcasting Response..." : isRecording ? "Recording..." : "Hold mic to speak"}
         </Text>
         
         <View style={styles.modeSelector}>
@@ -268,9 +295,7 @@ export default function NexusScreen() {
         </View>
       </View>
 
-      {/* --- ZONA DE CONTROLES INFERIOR --- */}
       <View style={styles.bottomControls}>
-          {/* 👇 BOTÓN JUST BE */}
           {!aiSpeaking && !isRecording && (
               <TouchableOpacity style={styles.silentBtn} onPress={triggerSilentCheckIn}>
                   <Ionicons name="hand-left-outline" size={20} color="#94A3B8" />
@@ -278,14 +303,12 @@ export default function NexusScreen() {
               </TouchableOpacity>
           )}
 
-          {/* BOTÓN MICRÓFONO */}
           {!aiSpeaking && (
             <TouchableOpacity style={[styles.micButton, isRecording && { backgroundColor: '#EF4444', borderColor: '#EF4444' }]} onPressIn={startRecording} onPressOut={stopRecording}>
                 <Ionicons name={isRecording ? "mic" : "mic-outline"} size={32} color="white" />
             </TouchableOpacity>
           )}
 
-           {/* BOTÓN STOP */}
            {aiSpeaking && (
               <TouchableOpacity style={styles.fabStop} onPress={stopSpeaking}>
                 <Ionicons name="stop-circle" size={30} color="white" />
@@ -294,9 +317,6 @@ export default function NexusScreen() {
           )}
       </View>
 
-      {/* --- MODALES --- */}
-
-      {/* 1. PICKER DE ALARMA (IGUAL) */}
       {showTimePicker && Platform.OS === 'android' && (<DateTimePicker value={alarmTime} mode="time" display="default" onChange={onTimeChange} />)}
       {showTimePicker && Platform.OS === 'ios' && (
         <View style={styles.pickerOverlay}>
@@ -309,7 +329,6 @@ export default function NexusScreen() {
         </View>
       )}
 
-      {/* 2. ALERTA CYBER (IGUAL) */}
       <Modal visible={alertVisible} transparent={true} animationType="fade" onRequestClose={() => setAlertVisible(false)}>
           <View style={styles.modalOverlay}>
               <View style={[styles.cyberAlertBox, { borderColor: alertConfig.type === 'success' ? '#38BDF8' : alertConfig.type === 'error' ? '#EF4444' : '#F59E0B' }]}>
@@ -321,7 +340,6 @@ export default function NexusScreen() {
           </View>
       </Modal>
 
-      {/* 🔴 3. MODAL DE LOGOUT (CYBERPUNK - NUEVO) */}
       <Modal visible={logoutVisible} transparent={true} animationType="fade" onRequestClose={() => setLogoutVisible(false)}>
           <View style={styles.modalOverlay}>
               <View style={[styles.cyberAlertBox, { borderColor: '#EF4444' }]}>
@@ -368,19 +386,12 @@ const styles = StyleSheet.create({
   statusText: { color: '#64748B', marginTop: 30, letterSpacing: 2, fontSize: 10, textTransform: 'uppercase' },
   modeSelector: { flexDirection: 'row', marginTop: 40, gap: 15 },
   modeDot: { width: 12, height: 12, borderRadius: 6 },
-  
-  // 👇 NUEVA BARRA DE CONTROLES
   bottomControls: { position: 'absolute', bottom: 50, alignSelf: 'center', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', width: '100%' },
-  
-  micButton: { width: 80, height: 80, borderRadius: 40, backgroundColor: '#1e293b', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#334155', shadowColor: '#000', shadowOpacity: 0.5, shadowRadius: 10 },
-  
-  // ESTILO BOTÓN SILENT
+  micButton: { width: 80, height: 80, borderRadius: 40, backgroundColor: '#1e293b', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#334155' },
   silentBtn: { position: 'absolute', left: 40, alignItems: 'center', justifyContent: 'center', padding: 10 },
   silentText: { color: '#64748B', fontSize: 10, marginTop: 5, fontWeight: 'bold' },
-
-  fabStop: { backgroundColor: '#EF4444', flexDirection: 'row', alignItems: 'center', paddingHorizontal: 30, paddingVertical: 15, borderRadius: 30, shadowColor: '#000', shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.5, shadowRadius: 5, elevation: 10, borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)' },
+  fabStop: { backgroundColor: '#EF4444', flexDirection: 'row', alignItems: 'center', paddingHorizontal: 30, paddingVertical: 15, borderRadius: 30, borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)' },
   fabText: { color: 'white', fontWeight: 'bold', marginLeft: 10, fontSize: 16, letterSpacing: 1 },
-
   pickerOverlay: { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, backgroundColor: 'rgba(0,0,0,0.9)', justifyContent: 'center', alignItems: 'center', zIndex: 100 },
   pickerBox: { width: 300, backgroundColor: '#1e293b', borderRadius: 20, padding: 20, alignItems: 'center', borderWidth: 1, borderColor: '#38BDF8' },
   pickerTitle: { color: 'white', fontSize: 18, fontWeight: 'bold', marginBottom: 20 },
