@@ -1,16 +1,26 @@
 import { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, Alert } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
+import * as SecureStore from 'expo-secure-store';
 
-// TU SERVIDOR (Lo he copiado de tu foto)
+// TU SERVIDOR
 const API_URL = 'https://wishpermind-backend.onrender.com';
 
 export default function AuthScreen() {
   const router = useRouter();
-  const [isLogin, setIsLogin] = useState(true); // Para cambiar entre Login y Registro
+  const [isLogin, setIsLogin] = useState(true); 
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+
+  // 🔑 FUNCIÓN PARA GUARDAR LA LLAVE EN CUALQUIER DISPOSITIVO
+  const saveToken = async (token: string) => {
+    if (Platform.OS === 'web') {
+      localStorage.setItem('user_token', token);
+    } else {
+      await SecureStore.setItemAsync('user_token', token);
+    }
+  };
 
   const handleAuth = async () => {
     if (!username || !password) {
@@ -19,32 +29,54 @@ export default function AuthScreen() {
     }
 
     setLoading(true);
-    const endpoint = isLogin ? '/auth/login' : '/auth/register';
 
     try {
-      console.log(`Intentando conectar a: ${API_URL}${endpoint}`);
-      
-      const response = await fetch(`${API_URL}${endpoint}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password }),
-      });
+      if (isLogin) {
+        // --- LÓGICA DE LOGIN (Format: Form URL Encoded) ---
+        const params = new URLSearchParams();
+        params.append('username', username.toLowerCase().trim());
+        params.append('password', password);
 
-      if (response.ok) {
-        if (isLogin) {
-          // SI EL LOGIN ES CORRECTO -> ¡ENTRAMOS A LA CASA! 🏠
+        const response = await fetch(`${API_URL}/auth/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: params.toString(),
+        });
+
+        const data = await response.json();
+
+        if (response.ok && data.access_token) {
+          await saveToken(data.access_token);
           console.log("Login exitoso. Entrando...");
           router.replace('/(tabs)'); 
         } else {
-          Alert.alert('Éxito', 'Usuario creado. Ahora puedes entrar.');
-          setIsLogin(true); // Cambiamos a modo login
+          Alert.alert('Error', data.detail || 'Credenciales incorrectas');
         }
+
       } else {
-        const errorData = await response.json();
-        Alert.alert('Error', errorData.detail || 'Algo salió mal');
+        // --- LÓGICA DE REGISTRO (Format: JSON + Disclaimer) ---
+        const response = await fetch(`${API_URL}/auth/register`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            username: username.toLowerCase().trim(), 
+            email: username.toLowerCase().trim(), // Usamos el username como email para el registro
+            password: password,
+            disclaimer_accepted: true // 🔐 Indispensable para el Backend
+          }),
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+          Alert.alert('Éxito', 'Consciencia creada. Ahora puedes acceder.');
+          setIsLogin(true);
+        } else {
+          Alert.alert('Error', data.detail || 'Error en el registro');
+        }
       }
     } catch (error) {
-      Alert.alert('Error de Conexión', 'No se pudo contactar con el servidor. Revisa tu internet.');
+      Alert.alert('Error de Conexión', 'No se pudo contactar con el servidor.');
       console.error(error);
     } finally {
       setLoading(false);
@@ -58,7 +90,7 @@ export default function AuthScreen() {
 
       <View style={styles.inputContainer}>
         <TextInput
-          placeholder="Usuario"
+          placeholder="Usuario (Email)"
           placeholderTextColor="#64748B"
           style={styles.input}
           value={username}
@@ -97,53 +129,13 @@ export default function AuthScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#0F172A',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-  },
-  title: {
-    fontSize: 40,
-    fontWeight: 'bold',
-    color: '#38BDF8',
-    marginBottom: 10,
-  },
-  subtitle: {
-    fontSize: 18,
-    color: '#94A3B8',
-    marginBottom: 40,
-  },
-  inputContainer: {
-    width: '100%',
-    marginBottom: 20,
-  },
-  input: {
-    backgroundColor: '#1E293B',
-    color: '#FFFFFF',
-    borderRadius: 10,
-    padding: 15,
-    marginBottom: 15,
-    borderWidth: 1,
-    borderColor: '#334155',
-  },
-  button: {
-    backgroundColor: '#38BDF8',
-    padding: 15,
-    borderRadius: 10,
-    width: '100%',
-    alignItems: 'center',
-  },
-  buttonText: {
-    color: '#0F172A',
-    fontWeight: 'bold',
-    fontSize: 16,
-  },
-  switchButton: {
-    marginTop: 20,
-  },
-  switchText: {
-    color: '#94A3B8',
-  }
+  container: { flex: 1, backgroundColor: '#0F172A', justifyContent: 'center', alignItems: 'center', padding: 20 },
+  title: { fontSize: 40, fontWeight: 'bold', color: '#38BDF8', marginBottom: 10 },
+  subtitle: { fontSize: 18, color: '#94A3B8', marginBottom: 40 },
+  inputContainer: { width: '100%', marginBottom: 20 },
+  input: { backgroundColor: '#1E293B', color: '#FFFFFF', borderRadius: 10, padding: 15, marginBottom: 15, borderWidth: 1, borderColor: '#334155' },
+  button: { backgroundColor: '#38BDF8', padding: 15, borderRadius: 10, width: '100%', alignItems: 'center' },
+  buttonText: { color: '#0F172A', fontWeight: 'bold', fontSize: 16 },
+  switchButton: { marginTop: 20 },
+  switchText: { color: '#94A3B8' }
 });
