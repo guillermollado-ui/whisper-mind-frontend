@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Animated, Easing, Modal, Platform, ActivityIndicator } from 'react-native'; 
+import { View, Text, StyleSheet, TouchableOpacity, Animated, Easing, Modal, Platform } from 'react-native'; 
 import { Audio } from 'expo-av';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -8,12 +8,12 @@ import * as Device from 'expo-device';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useFocusEffect, useRouter } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
+import * as Updates from 'expo-updates';
 
-// ⚠️ URL DE RENDER
+// ⚠️ URL DE RENDER (Verifica que sea la tuya correcta)
 const API_URL = 'https://wishpermind-backend.onrender.com';
-const SESSION_ID = 'user-premium-1';
 
-// 🔊 SONIDO PENSANDO
+// 🔊 SONIDO PENSANDO (Silencio o ruido blanco suave)
 const THINKING_SOUND_B64 = `data:audio/mp3;base64,//uQRAAAAWMSLwUIYAAsYkXgoQwAEaYLWfkWgAI0wWs/ItAAAG1xISIYkYkXYIPT+2J0EDl+CwKD74V4E4CiCdZ94AA+e4AADtKd//+67Wteqa9//tu+pTtH/s9ufnyzvnT48Y2enxrGlxXVwcjqVuyVKi4JDOepFir//uQRAAAAVWMFUBiAAArYYKQDIAAAydVoYGIACtDqvDIwAAAiE4z/6oVE2urcTE7lzqkcOAUBsQSg5xdxIx4YAoMZRJ5wQIEMITaTkqhuOqgsoPZfwFQPqQSjlhSx8/znYrcv/z4PH99989////533//uQRAAAAWMSLwUIYAAsYkXgoQwAEaYLWfkWgAI0wWs/ItAAAG1xISIYkYkXYIPT+2J0EDl+CwKD74V4E4CiCdZ94AA+e4AADtKd//+67Wteqa9//tu+pTtH/s9ufnyzvnT48Y2enxrGlxXVwcjqVuyVKi4JDOepFir//uQRAAAAVWMFUBiAAArYYKQDIAAAydVoYGIACtDqvDIwAAAiE4z/6oVE2urcTE7lzqkcOAUBsQSg5xdxIx4YAoMZRJ5wQIEMITaTkqhuOqgsoPZfwFQPqQSjlhSx8/znYrcv/z4PH99989////533`;
 
 const MODES = [
@@ -53,31 +53,33 @@ export default function NexusScreen() {
   const [aiThinking, setAiThinking] = useState(false);
   const [aiSpeaking, setAiSpeaking] = useState(false);
   const [currentMode, setCurrentMode] = useState(MODES[0]); 
-  
+   
   const [showTimePicker, setShowTimePicker] = useState(false);
   const [alarmTime, setAlarmTime] = useState(new Date());
 
   const [alertVisible, setAlertVisible] = useState(false);
   const [alertConfig, setAlertConfig] = useState({ title: '', body: '', type: 'success' });
-  
   const [logoutVisible, setLogoutVisible] = useState(false);
 
   const soundRef = useRef<Audio.Sound | null>(null);
   const thinkingSoundRef = useRef<Audio.Sound | null>(null);
   const pulseAnim = useRef(new Animated.Value(1)).current; 
 
-  // --- 🔑 UNIVERSAL TOKEN GETTER ---
   const getAuthToken = async () => {
-    if (Platform.OS === 'web') {
-      return localStorage.getItem('user_token');
-    } else {
-      return await SecureStore.getItemAsync('user_token');
-    }
+    if (Platform.OS === 'web') return localStorage.getItem('user_token');
+    return await SecureStore.getItemAsync('user_token');
   };
 
+  // --- PERMISOS DEL MICROFONO ---
   useEffect(() => {
     async function setupAudio() {
       try {
+        const permission = await Audio.requestPermissionsAsync();
+        if (permission.status !== 'granted') {
+            showCyberAlert("System Error", "Microphone access denied.", "error");
+            return;
+        }
+
         await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true, staysActiveInBackground: true, shouldDuckAndroid: true });
         const { sound } = await Audio.Sound.createAsync({ uri: THINKING_SOUND_B64 }, { shouldPlay: false, volume: 1.0 });
         thinkingSoundRef.current = sound;
@@ -98,19 +100,34 @@ export default function NexusScreen() {
     setAiSpeaking(false);
   };
 
-  const handleLogoutPress = () => {
-      setLogoutVisible(true); 
-  };
+  const handleLogoutPress = () => setLogoutVisible(true);
 
+ // 🚪 FUNCIÓN DE LOGOUT SEGURA (CORREGIDA)
   const confirmLogout = async () => {
-      setLogoutVisible(false);
-      if (aiSpeaking) await stopSpeaking();
-      if (Platform.OS === 'web') {
-        localStorage.removeItem('user_token');
-      } else {
-        await SecureStore.deleteItemAsync('user_token');
+      setLogoutVisible(false); // Cierra el modal visualmente
+      
+      // 1. Intentamos callar a Alice si está hablando
+      if (aiSpeaking) {
+          try { await stopSpeaking(); } catch(e) {}
       }
-      router.replace('/');
+
+      try {
+        // 2. Borramos la llave de la memoria
+        if (Platform.OS === 'web') {
+            localStorage.removeItem('user_token');
+        } else {
+            await SecureStore.deleteItemAsync('user_token');
+        }
+        
+        // 3. NAVEGACIÓN DIRECTA A AUTH (CAMBIO CRÍTICO AQUÍ)
+        // Forzamos ir a la carpeta (auth), no a la raíz '/'
+        router.replace('/(auth)'); 
+
+      } catch (error) {
+        console.log("Error al salir:", error);
+        // Si falla el borrado, forzamos la navegación a Auth igualmente
+        router.replace('/(auth)');
+      }
   };
 
   useEffect(() => {
@@ -132,11 +149,8 @@ export default function NexusScreen() {
       const token = await getAuthToken();
       const res = await fetch(`${API_URL}/chat/morning`, { 
         method: 'POST', 
-        headers: { 
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}` 
-        }, 
-        body: JSON.stringify({ text: "WAKE UP", mode: "morning", session_id: SESSION_ID }) 
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, 
+        body: JSON.stringify({ text: "WAKE UP", mode: "morning" }) 
       });
       const data = await res.json();
       if (data.audio) await playResponse(data.audio);
@@ -152,23 +166,12 @@ export default function NexusScreen() {
           const token = await getAuthToken();
           const res = await fetch(`${API_URL}/chat/morning`, { 
               method: 'POST', 
-              headers: { 
-                  'Content-Type': 'application/json',
-                  'Authorization': `Bearer ${token}` 
-              }, 
-              body: JSON.stringify({ 
-                  text: "I don't want to talk right now. I just need support.", 
-                  mode: "silent_comfort", 
-                  session_id: SESSION_ID 
-              }) 
+              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, 
+              body: JSON.stringify({ text: "I need support.", mode: "silent_comfort" }) 
           });
           const data = await res.json();
           if (data.audio) await playResponse(data.audio);
-      } catch (e) { 
-          showCyberAlert("Connection Error", "Check internet.", "error"); 
-      } finally { 
-          setAiThinking(false); 
-      }
+      } catch (e) { showCyberAlert("Connection Error", "Check internet.", "error"); } finally { setAiThinking(false); }
   };
 
   const scheduleNotification = async (date: Date) => {
@@ -179,31 +182,31 @@ export default function NexusScreen() {
         }
         await Notifications.cancelAllScheduledNotificationsAsync();
         const trigger = new Date(date);
-        const now = new Date();
-        if (trigger <= now) trigger.setDate(trigger.getDate() + 1);
+        if (trigger <= new Date()) trigger.setDate(trigger.getDate() + 1);
 
         await Notifications.scheduleNotificationAsync({
             content: { title: "☀️ Wake Up", body: "Your mind briefing is ready. Tap here.", sound: true },
             trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: trigger },
         });
-        showCyberAlert("Protocol Activated", `Briefing ready for ${trigger.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}`, "success");
-    } catch (error) { showCyberAlert("System Error", "Could not set alarm protocol.", "error"); } finally { setShowTimePicker(false); }
+        showCyberAlert("Protocol Activated", `Briefing set for ${trigger.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}`, "success");
+    } catch (error) { showCyberAlert("System Error", "Could not set alarm.", "error"); } finally { setShowTimePicker(false); }
   };
 
   async function startRecording() {
     if (aiSpeaking) await stopSpeaking();
     try {
+      await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
       const { recording } = await Audio.Recording.createAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
       setRecording(recording);
       setIsRecording(true);
-    } catch (err) { console.error(err); }
+    } catch (err) { console.error("Error grabando:", err); showCyberAlert("Mic Error", "Check permissions", "error"); }
   }
 
   async function stopRecording() {
     if (!recording) return;
     setIsRecording(false);
     setAiThinking(true); 
-    try { if (thinkingSoundRef.current) { await thinkingSoundRef.current.stopAsync(); await thinkingSoundRef.current.setPositionAsync(0); await thinkingSoundRef.current.playAsync(); } } catch (e) {}
+    try { if (thinkingSoundRef.current) { await thinkingSoundRef.current.playAsync(); } } catch (e) {}
 
     await recording.stopAndUnloadAsync();
     const uri = recording.getURI(); 
@@ -214,21 +217,26 @@ export default function NexusScreen() {
   async function sendAudioToBackend(uri: string) {
     try {
       const token = await getAuthToken();
+      if (!token) { showCyberAlert("Auth Error", "Please login again", "error"); return; }
+      
       const formData = new FormData();
-      // Ajuste universal para FormData
       formData.append('file', { uri, name: 'voice.m4a', type: 'audio/m4a' } as any);
-      formData.append('session_id', SESSION_ID);
       formData.append('mode', currentMode.id); 
+
       const res = await fetch(`${API_URL}/chat/voice`, { 
         method: 'POST', 
-        headers: {
-            'Authorization': `Bearer ${token}`
-        },
+        headers: { 'Authorization': `Bearer ${token}` }, 
         body: formData 
       });
+      
       const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Server error");
       if (data.audio) playResponse(data.audio);
-    } catch (e) { showCyberAlert("Network Error", "Retry.", "error"); } finally { setAiThinking(false); }
+      
+    } catch (e) { 
+        console.log(e);
+        showCyberAlert("Network Error", "Could not reach Nexus.", "error"); 
+    } finally { setAiThinking(false); }
   }
 
   async function playResponse(base64Audio: string) {
@@ -251,7 +259,7 @@ export default function NexusScreen() {
   return (
     <View style={styles.container}>
       <LinearGradient colors={['#0f172a', '#1e293b', '#000000']} style={StyleSheet.absoluteFill} />
-      
+       
       <View style={styles.header}>
         <View style={{flex: 1}}>
             <Text style={styles.title}>NEXUS</Text>
@@ -317,6 +325,7 @@ export default function NexusScreen() {
           )}
       </View>
 
+      {/* MODALES Y PICKERS */}
       {showTimePicker && Platform.OS === 'android' && (<DateTimePicker value={alarmTime} mode="time" display="default" onChange={onTimeChange} />)}
       {showTimePicker && Platform.OS === 'ios' && (
         <View style={styles.pickerOverlay}>
@@ -365,7 +374,6 @@ export default function NexusScreen() {
               </View>
           </View>
       </Modal>
-
     </View>
   );
 }
