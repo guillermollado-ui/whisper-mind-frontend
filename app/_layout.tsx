@@ -1,27 +1,34 @@
 import { useEffect, useState } from 'react';
-import { View, ActivityIndicator } from 'react-native';
+import { View, ActivityIndicator, Platform } from 'react-native';
 import { Slot, useRouter, useSegments } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
 import { StatusBar } from 'expo-status-bar';
 import { LogBox } from 'react-native';
 
-// Ignorar advertencias específicas de Expo Go que no afectan a la app real
+// Ignorar advertencias específicas
 LogBox.ignoreLogs([
   'expo-notifications: Android Push notifications',
-  'Audio Playback Error' // Por si acaso el de audio persiste como warning
+  'Audio Playback Error',
+  'Method writeAsStringAsync'
 ]);
+
 export default function RootLayout() {
   const [loading, setLoading] = useState(true);
   const router = useRouter();
-  const segments = useSegments(); 
+  const segments = useSegments();
 
   useEffect(() => {
     const checkAuth = async () => {
       try {
-        // 1. Buscamos la llave
-        const token = await SecureStore.getItemAsync('user_token');
+        // 1. Buscamos la llave (Token)
+        let token;
+        if (Platform.OS === 'web') {
+            token = localStorage.getItem('user_token');
+        } else {
+            token = await SecureStore.getItemAsync('user_token');
+        }
         
-        // 2. Vemos en qué habitación estás intentando entrar
+        // 2. Vemos si estás intentando entrar en la zona de autenticación
         const inAuthGroup = segments[0] === '(auth)';
         
         if (token) {
@@ -34,7 +41,7 @@ export default function RootLayout() {
             // NO TIENES LLAVE -> Te mandamos directo al Login (Auth)
             // Solo redirigimos si NO estabas ya en el login
             if (!inAuthGroup) {
-                router.replace('/(auth)'); // Aquí es donde te fuerza a loguearte
+                router.replace('/(auth)'); 
             }
         }
       } catch (e) {
@@ -45,7 +52,7 @@ export default function RootLayout() {
     };
 
     checkAuth();
-  }, [segments]); 
+  }, [segments]);
 
   if (loading) {
     return (
