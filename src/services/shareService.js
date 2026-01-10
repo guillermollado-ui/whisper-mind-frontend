@@ -1,48 +1,44 @@
-// 👇 CORRECCIÓN CLAVE: Añadimos '/legacy' para usar las herramientas clásicas de Expo
-import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
+import * as FileSystem from 'expo-file-system/legacy';
 
-/**
- * Servicio de arquitectura para compartir imágenes.
- * Versión corregida para Expo SDK 51/52 (Legacy API).
- */
-export const shareImage = async (imageSource, isBase64 = true) => {
+export const shareImage = async (uri) => {
   try {
-    // 1. Verificación de disponibilidad
-    const isAvailable = await Sharing.isAvailableAsync();
-    if (!isAvailable) {
-      alert("Tu dispositivo no permite compartir archivos.");
+    // 1. Validación básica
+    if (!uri) {
+      console.error("Error: No hay URI para compartir");
       return;
     }
 
-    let uriToShare = imageSource;
-
-    // 2. Procesamiento de Base64
-    if (isBase64) {
-      // Usamos cacheDirectory para no llenar el móvil de basura
-      const filename = FileSystem.cacheDirectory + `whisper_dream_${Date.now()}.png`;
-      
-      // Limpiamos la cadena Base64 por si viene sucia
-      const base64Data = imageSource.replace(/^data:image\/\w+;base64,/, "");
-
-      // Escribimos el archivo usando la API Legacy
-      await FileSystem.writeAsStringAsync(filename, base64Data, {
-        encoding: 'base64', // Usamos el texto directo para evitar errores de constantes
-      });
-
-      uriToShare = filename;
+    // 2. Verificar si compartir está disponible
+    const isAvailable = await Sharing.isAvailableAsync();
+    if (!isAvailable) {
+      alert("Compartir no soportado en este dispositivo");
+      return;
     }
 
-    // 3. Compartir
+    let uriToShare = uri;
+
+    // 3. IMPORTANTE: Si es una URL de internet (https), descargarla primero
+    if (uri.startsWith('http') || uri.startsWith('https')) {
+      // Creamos una ruta temporal local
+      const fileUri = FileSystem.cacheDirectory + 'whisper_shared_image.png';
+      
+      // Descargamos la imagen de la URL remota a la ruta local
+      const downloadRes = await FileSystem.downloadAsync(uri, fileUri);
+      
+      // Usamos la nueva ruta local
+      uriToShare = downloadRes.uri;
+    }
+
+    // 4. Compartir el archivo (ahora garantizado que es local)
     await Sharing.shareAsync(uriToShare, {
       mimeType: 'image/png',
-      dialogTitle: 'Whisper Mind Artifact',
+      dialogTitle: 'Compartir Artefacto',
       UTI: 'public.png'
     });
 
   } catch (error) {
-    console.error("Error en shareService:", error);
-    // Mostramos el mensaje limpio al usuario
-    alert("No se pudo iniciar el compartido. Inténtalo de nuevo.");
+    console.error("Error en shareImage:", error);
+    alert("No se pudo compartir la imagen. Intenta de nuevo.");
   }
 };

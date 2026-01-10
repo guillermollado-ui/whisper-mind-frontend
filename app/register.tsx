@@ -9,22 +9,40 @@ import {
     ActivityIndicator,
     KeyboardAvoidingView,
     Platform,
+    Linking
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 
+// 🌍 TU BACKEND EN RENDER
 const API_URL = 'https://wishpermind-backend.onrender.com';
+
+// 🍋 TU LINK DE PAGO (Lo actualizaremos mañana)
+const LEMON_SQUEEZY_URL = 'https://google.com'; 
 
 export default function RegisterScreen() {
     const router = useRouter();
     const [username, setUsername] = useState('');
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
+    
+    // 🛡️ ESTADO PARA EL DISCLAIMER
+    const [disclaimerAccepted, setDisclaimerAccepted] = useState(false);
+    
     const [loading, setLoading] = useState(false);
     const [showPassword, setShowPassword] = useState(false);
 
     const handleRegister = async () => {
+        // 1. VALIDACIÓN DEL DISCLAIMER
+        if (!disclaimerAccepted) {
+            Alert.alert(
+                'Access Denied', 
+                'You must accept the Medical Disclaimer to establish a neural link.'
+            );
+            return;
+        }
+
         if (!username || !email || !password) {
             Alert.alert('Missing Data', 'Please fill in all fields to create your protocol.');
             return;
@@ -39,7 +57,7 @@ export default function RegisterScreen() {
                     username: username,
                     email: email,
                     password: password,
-                    disclaimer_accepted: true 
+                    disclaimer_accepted: true // Enviamos TRUE porque el usuario ya validó el checkbox
                 }),
             });
 
@@ -57,10 +75,14 @@ export default function RegisterScreen() {
 
         } catch (error) {
             console.error(error);
-            Alert.alert('Connection Error', 'Neural link failed.');
+            Alert.alert('Connection Error', 'Neural link failed. Check your internet.');
         } finally {
             setLoading(false);
         }
+    };
+
+    const openPayment = () => {
+        Linking.openURL(LEMON_SQUEEZY_URL);
     };
 
     return (
@@ -128,8 +150,25 @@ export default function RegisterScreen() {
                         </TouchableOpacity>
                     </View>
 
+                    {/* 🛡️ DISCLAIMER MÉDICO (CHECKBOX) */}
                     <TouchableOpacity 
-                        style={styles.registerBtn} 
+                        style={styles.disclaimerContainer} 
+                        onPress={() => setDisclaimerAccepted(!disclaimerAccepted)}
+                    >
+                        <Ionicons 
+                            name={disclaimerAccepted ? "checkbox" : "square-outline"} 
+                            size={24} 
+                            color={disclaimerAccepted ? "#10B981" : "#64748B"} 
+                            style={{marginRight: 10}}
+                        />
+                        <Text style={styles.disclaimerText}>
+                            I acknowledge that Whisper Mind is an AI tool, <Text style={{color: '#ef4444', fontWeight: 'bold'}}>NOT a doctor</Text>. I accept the terms.
+                        </Text>
+                    </TouchableOpacity>
+
+                    {/* BOTÓN REGISTRO */}
+                    <TouchableOpacity 
+                        style={[styles.registerBtn, !disclaimerAccepted && {opacity: 0.5}]} 
                         onPress={handleRegister}
                         disabled={loading}
                     >
@@ -138,6 +177,11 @@ export default function RegisterScreen() {
                         ) : (
                             <Text style={styles.registerBtnText}>ESTABLISH PROTOCOL</Text>
                         )}
+                    </TouchableOpacity>
+
+                    {/* 💎 BOTÓN FOUNDER (Opcional) */}
+                    <TouchableOpacity style={styles.founderBtn} onPress={openPayment}>
+                         <Text style={styles.founderText}>💎  GET FOUNDER PASS</Text>
                     </TouchableOpacity>
 
                     <TouchableOpacity style={styles.loginLink} onPress={() => router.back()}>
@@ -155,15 +199,25 @@ const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#000' },
     content: { flex: 1, justifyContent: 'center', paddingHorizontal: 30 },
     backButton: { position: 'absolute', top: 60, left: 30, zIndex: 10 },
-    headerContainer: { marginBottom: 40, alignItems: 'center' },
+    headerContainer: { marginBottom: 30, alignItems: 'center' },
     title: { fontSize: 28, fontWeight: '900', color: '#fff', letterSpacing: 2, marginBottom: 5 },
     subtitle: { fontSize: 10, color: '#10B981', letterSpacing: 3, fontWeight: 'bold' },
     formContainer: { width: '100%' },
     inputWrapper: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#1e293b', borderRadius: 12, borderWidth: 1, borderColor: '#334155', marginBottom: 15, paddingHorizontal: 15, height: 55 },
     inputIcon: { marginRight: 10 },
     input: { flex: 1, color: '#fff', fontSize: 16 },
-    registerBtn: { backgroundColor: '#10B981', borderRadius: 12, height: 55, justifyContent: 'center', alignItems: 'center', marginBottom: 20, marginTop: 10, shadowColor: '#10B981', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 10, elevation: 5 },
+    
+    // Estilos nuevos para Disclaimer
+    disclaimerContainer: { flexDirection: 'row', alignItems: 'center', marginBottom: 20, paddingHorizontal: 5 },
+    disclaimerText: { color: '#94A3B8', fontSize: 12, flex: 1 },
+
+    registerBtn: { backgroundColor: '#10B981', borderRadius: 12, height: 55, justifyContent: 'center', alignItems: 'center', marginBottom: 15, shadowColor: '#10B981', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 10, elevation: 5 },
     registerBtnText: { color: '#000', fontSize: 16, fontWeight: 'bold', letterSpacing: 1 },
+    
+    // Estilo botón Founder
+    founderBtn: { borderWidth: 1, borderColor: '#ca8a04', borderRadius: 12, height: 45, justifyContent: 'center', alignItems: 'center', marginBottom: 20, backgroundColor: 'rgba(202, 138, 4, 0.1)' },
+    founderText: { color: '#facc15', fontSize: 12, fontWeight: 'bold', letterSpacing: 1 },
+
     loginLink: { alignItems: 'center' },
     loginText: { color: '#94A3B8', fontSize: 14 },
     loginHighlight: { color: '#10B981', fontWeight: 'bold' },
