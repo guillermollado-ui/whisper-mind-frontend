@@ -80,8 +80,8 @@ export default function InsightsScreen() {
     const [refreshing, setRefreshing] = useState(false);
     const [data, setData] = useState(null);
     
-    // NAVEGACIÓN EMOCIONAL (Nuevos Estados)
-    const [aliceStory, setAliceStory] = useState(null); // { story, core_pattern, archetype }
+    // NAVEGACIÓN EMOCIONAL
+    const [aliceStory, setAliceStory] = useState(null); 
     const [aliceMessage, setAliceMessage] = useState("Tap below to see what Alice sees in you this week.");
     
     const [dailyTasks, setDailyTasks] = useState([]); 
@@ -98,14 +98,12 @@ export default function InsightsScreen() {
         try {
             const today = new Date().toDateString();
             
-            // 1. Cargar Tareas
             const savedTasks = await AsyncStorage.getItem('daily_tasks_cache');
             const savedDate = await AsyncStorage.getItem('daily_tasks_date');
             if (savedDate === today && savedTasks) {
                 setDailyTasks(JSON.parse(savedTasks));
             }
 
-            // 2. Cargar Historia Emocional (Nuevo Cache)
             const savedStory = await AsyncStorage.getItem('insights_story_cache');
             if (savedDate === today && savedStory) {
                 setAliceStory(JSON.parse(savedStory));
@@ -126,7 +124,6 @@ export default function InsightsScreen() {
             return task;
         });
         setDailyTasks(updatedTasks);
-        // CORREGIDO AQUÍ: Quitada la palabra "Async" extra
         AsyncStorage.setItem('daily_tasks_cache', JSON.stringify(updatedTasks));
     };
 
@@ -193,9 +190,8 @@ export default function InsightsScreen() {
 
             const responseData = await res.json();
             if (res.ok) {
-                // 1. Guardar la Historia Emocional
                 const newStory = {
-                    story: responseData.story || responseData.text, // Fallback si el backend aun no manda story
+                    story: responseData.story || responseData.text, 
                     core_pattern: responseData.core_pattern || "Finding your rhythm.",
                     archetype: responseData.archetype || { name: "The Observer", description: "Watching before acting." }
                 };
@@ -203,15 +199,12 @@ export default function InsightsScreen() {
                 setAliceStory(newStory);
                 setAliceMessage(responseData.analysis_text || responseData.text);
                 
-                // Cachear la historia
                 const today = new Date().toDateString();
                 await AsyncStorage.setItem('insights_story_cache', JSON.stringify(newStory));
                 await AsyncStorage.setItem('daily_tasks_date', today);
 
-                // 2. Audio
                 if (responseData.audio) playAudioData(responseData.audio);
                 
-                // 3. Tareas
                 if (responseData.tasks && Array.isArray(responseData.tasks)) {
                     const timestamp = Date.now();
                     const newTasks = responseData.tasks.map((t, i) => ({
@@ -237,13 +230,20 @@ export default function InsightsScreen() {
         setDailyTasks(newTasks);
     };
 
+    // --- ✅ FUNCIÓN MEJORADA: MARCA COMO HECHA + NAVEGA ---
     const navigateToTask = async (route, taskId) => {
+        // 1. Marcar automáticamente como completada (¡esto dispara el confeti!)
+        handleToggleTask(taskId);
+
         const today = new Date().toDateString();
         if (route === '/vault') await AsyncStorage.setItem('last_vault_visit', today);
         else if (route === '/') await AsyncStorage.setItem('last_chat_interaction', today);
         
-        if (route === '/') router.replace('/'); 
-        else if (route === '/vault') router.replace('/vault');
+        // 2. Pequeño delay para ver el Check y el Confeti antes de irnos
+        setTimeout(() => {
+            if (route === '/') router.replace('/'); 
+            else if (route === '/vault') router.replace('/vault');
+        }, 1200); // 1.2 segundos de gloria antes de navegar
     };
 
     useFocusEffect(useCallback(() => { 
@@ -284,12 +284,11 @@ export default function InsightsScreen() {
                     <ActivityIndicator size="large" color="#38BDF8" style={{marginTop: 50}} />
                 ) : (
                     <>
-                        {/* --- BLOQUE 1: YOUR EMOTIONAL STORY (NUEVO UI WOW) --- */}
+                        {/* --- BLOQUE 1: YOUR EMOTIONAL STORY --- */}
                         <LinearGradient 
                             colors={['#1e293b', '#0f172a']} 
                             style={styles.storyCard}
                         >
-                            {/* CABECERA CON ARQUETIPO */}
                             <View style={styles.archetypeHeader}>
                                 <View>
                                     <Text style={styles.storyLabel}>THIS WEEK'S ARCHETYPE</Text>
@@ -305,7 +304,6 @@ export default function InsightsScreen() {
 
                             <View style={styles.divider} />
 
-                            {/* CORE PATTERN HIGHLIGHT */}
                             {aliceStory?.core_pattern && (
                                 <View style={styles.patternBox}>
                                     <Ionicons name="key-outline" size={16} color="#F59E0B" />
@@ -315,7 +313,6 @@ export default function InsightsScreen() {
                                 </View>
                             )}
 
-                            {/* HISTORIA NARRATIVA */}
                             {analyzing ? (
                                 <View style={{flexDirection:'row', alignItems:'center', gap:10, paddingVertical: 20}}>
                                     <ActivityIndicator color="#10B981" size="small" />
@@ -327,7 +324,6 @@ export default function InsightsScreen() {
                                 </View>
                             )}
 
-                            {/* BOTÓN MÁGICO REBAUTIZADO */}
                             <TouchableOpacity 
                                 style={[styles.analyzeBtn, isPlaying && {borderColor: '#38BDF8', backgroundColor: 'rgba(56, 189, 248, 0.1)'}]} 
                                 onPress={handleManualAnalyze} disabled={analyzing}
@@ -339,10 +335,7 @@ export default function InsightsScreen() {
                             </TouchableOpacity>
                         </LinearGradient>
 
-
-                        {/* --- BLOQUE 2: GRÁFICOS (RENOMBRADOS) --- */}
-                        
-                        {/* SISMÓGRAFO */}
+                        {/* --- BLOQUE 2: GRÁFICOS --- */}
                         <View style={styles.card}>
                             <View style={styles.cardHeader}>
                                 <Ionicons name="pulse-outline" size={20} color="#38BDF8" />
@@ -360,7 +353,6 @@ export default function InsightsScreen() {
                             ) : (<View style={styles.emptyState}><Text style={styles.emptyText}>Not enough data points.</Text></View>)}
                         </View>
 
-                        {/* ESPECTRO EMOCIONAL */}
                         <View style={styles.card}>
                             <View style={styles.cardHeader}>
                                 <Ionicons name="prism-outline" size={20} color="#F59E0B" />
@@ -383,7 +375,7 @@ export default function InsightsScreen() {
                             )}
                         </View>
 
-                        {/* --- BLOQUE 3: PROTOCOLOS (TAREAS) --- */}
+                        {/* --- BLOQUE 3: PROTOCOLOS --- */}
                         <View style={styles.tasksContainer}>
                             <Text style={styles.sectionTitle}>ALIGNMENT PROTOCOLS</Text>
                             {dailyTasks.length > 0 ? dailyTasks.map((task, index) => (
@@ -410,6 +402,7 @@ export default function InsightsScreen() {
                                         <View style={styles.taskBody}>
                                             <View style={styles.divider} />
                                             <Text style={styles.taskDesc}>{task.description}</Text>
+                                            {/* Si NO está completada, mostramos el botón INITIATE */}
                                             {!task.completed && (
                                                 <TouchableOpacity style={styles.actionLink} onPress={() => navigateToTask(task.route, task.id)}>
                                                     <Text style={styles.actionLinkText}>INITIATE</Text>
@@ -448,7 +441,7 @@ const styles = StyleSheet.create({
     headerSubtitle: { fontSize: 10, color: '#64748B', letterSpacing: 3, marginTop: 5 },
     scrollContent: { paddingHorizontal: 20 },
     
-    // ESTILOS NUEVOS STORY CARD (WOW EFFECT)
+    // ESTILOS NUEVOS STORY CARD
     storyCard: { padding: 20, borderRadius: 20, marginBottom: 30, borderWidth: 1, borderColor: 'rgba(56, 189, 248, 0.2)' },
     archetypeHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
     storyLabel: { color: '#64748B', fontSize: 10, fontWeight: 'bold', letterSpacing: 1, marginBottom: 5 },

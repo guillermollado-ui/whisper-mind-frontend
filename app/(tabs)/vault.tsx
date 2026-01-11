@@ -160,7 +160,9 @@ export default function VaultScreen() {
             </View>
 
             <View style={styles.textContainer}>
-                <ExpandableText text={isJournal ? item.summary : item.prompt} color={accentColor} />
+                {/* ✅ CAMBIO CLAVE: Usamos summary (interpretación) también para Dream, con fallback a prompt */}
+                <ExpandableText text={item.summary || item.prompt} color={accentColor} />
+                
                 {isJournal && item.action && (
                     <View style={styles.actionBox}>
                         <Ionicons name="bulb-outline" size={14} color="#F59E0B" />
@@ -178,7 +180,7 @@ export default function VaultScreen() {
             </View>
 
             <View style={styles.cardFooter}>
-                <TouchableOpacity style={styles.footerBtn} onPress={() => handleShareText(isJournal ? item.summary : item.prompt, "WhisperMind Log")}>
+                <TouchableOpacity style={styles.footerBtn} onPress={() => handleShareText(item.summary || item.prompt, "WhisperMind Log")}>
                     <Ionicons name="share-social-outline" size={16} color="#94A3B8" />
                     <Text style={styles.footerBtnText}>EXPORT</Text>
                 </TouchableOpacity>
