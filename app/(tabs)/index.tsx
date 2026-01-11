@@ -8,12 +8,10 @@ import * as Device from 'expo-device';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useFocusEffect, useRouter } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
-import * as Updates from 'expo-updates';
 
-// ⚠️ URL DE RENDER (Verifica que sea la tuya correcta)
+// ⚠️ URL DE RENDER
 const API_URL = 'https://wishpermind-backend.onrender.com';
 
-// 🔊 SONIDO PENSANDO (Silencio o ruido blanco suave)
 const THINKING_SOUND_B64 = `data:audio/mp3;base64,//uQRAAAAWMSLwUIYAAsYkXgoQwAEaYLWfkWgAI0wWs/ItAAAG1xISIYkYkXYIPT+2J0EDl+CwKD74V4E4CiCdZ94AA+e4AADtKd//+67Wteqa9//tu+pTtH/s9ufnyzvnT48Y2enxrGlxXVwcjqVuyVKi4JDOepFir//uQRAAAAVWMFUBiAAArYYKQDIAAAydVoYGIACtDqvDIwAAAiE4z/6oVE2urcTE7lzqkcOAUBsQSg5xdxIx4YAoMZRJ5wQIEMITaTkqhuOqgsoPZfwFQPqQSjlhSx8/znYrcv/z4PH99989////533//uQRAAAAWMSLwUIYAAsYkXgoQwAEaYLWfkWgAI0wWs/ItAAAG1xISIYkYkXYIPT+2J0EDl+CwKD74V4E4CiCdZ94AA+e4AADtKd//+67Wteqa9//tu+pTtH/s9ufnyzvnT48Y2enxrGlxXVwcjqVuyVKi4JDOepFir//uQRAAAAVWMFUBiAAArYYKQDIAAAydVoYGIACtDqvDIwAAAiE4z/6oVE2urcTE7lzqkcOAUBsQSg5xdxIx4YAoMZRJ5wQIEMITaTkqhuOqgsoPZfwFQPqQSjlhSx8/znYrcv/z4PH99989////533`;
 
 const MODES = [
@@ -48,12 +46,15 @@ const Waveform = ({ color }: { color: string }) => {
 
 export default function NexusScreen() {
   const router = useRouter(); 
-  const [recording, setRecording] = useState<Audio.Recording | null>(null);
+  const [recording, setRecording] = useState(null);
   const [isRecording, setIsRecording] = useState(false);
   const [aiThinking, setAiThinking] = useState(false);
   const [aiSpeaking, setAiSpeaking] = useState(false);
   const [currentMode, setCurrentMode] = useState(MODES[0]); 
-   
+  
+  // Memoria para saber quién está grabando
+  const recordingModeRef = useRef('default'); 
+  
   const [showTimePicker, setShowTimePicker] = useState(false);
   const [alarmTime, setAlarmTime] = useState(new Date());
 
@@ -61,8 +62,8 @@ export default function NexusScreen() {
   const [alertConfig, setAlertConfig] = useState({ title: '', body: '', type: 'success' });
   const [logoutVisible, setLogoutVisible] = useState(false);
 
-  const soundRef = useRef<Audio.Sound | null>(null);
-  const thinkingSoundRef = useRef<Audio.Sound | null>(null);
+  const soundRef = useRef(null);
+  const thinkingSoundRef = useRef(null);
   const pulseAnim = useRef(new Animated.Value(1)).current; 
 
   const getAuthToken = async () => {
@@ -70,7 +71,6 @@ export default function NexusScreen() {
     return await SecureStore.getItemAsync('user_token');
   };
 
-  // --- PERMISOS DEL MICROFONO ---
   useEffect(() => {
     async function setupAudio() {
       try {
@@ -79,7 +79,6 @@ export default function NexusScreen() {
             showCyberAlert("System Error", "Microphone access denied.", "error");
             return;
         }
-
         await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true, staysActiveInBackground: true, shouldDuckAndroid: true });
         const { sound } = await Audio.Sound.createAsync({ uri: THINKING_SOUND_B64 }, { shouldPlay: false, volume: 1.0 });
         thinkingSoundRef.current = sound;
@@ -102,30 +101,14 @@ export default function NexusScreen() {
 
   const handleLogoutPress = () => setLogoutVisible(true);
 
- // 🚪 FUNCIÓN DE LOGOUT SEGURA (CORREGIDA)
   const confirmLogout = async () => {
-      setLogoutVisible(false); // Cierra el modal visualmente
-      
-      // 1. Intentamos callar a Alice si está hablando
-      if (aiSpeaking) {
-          try { await stopSpeaking(); } catch(e) {}
-      }
-
+      setLogoutVisible(false);
+      if (aiSpeaking) { try { await stopSpeaking(); } catch(e) {} }
       try {
-        // 2. Borramos la llave de la memoria
-        if (Platform.OS === 'web') {
-            localStorage.removeItem('user_token');
-        } else {
-            await SecureStore.deleteItemAsync('user_token');
-        }
-        
-        // 3. NAVEGACIÓN DIRECTA A AUTH (CAMBIO CRÍTICO AQUÍ)
-        // Forzamos ir a la carpeta (auth), no a la raíz '/'
+        if (Platform.OS === 'web') localStorage.removeItem('user_token');
+        else await SecureStore.deleteItemAsync('user_token');
         router.replace('/(auth)'); 
-
       } catch (error) {
-        console.log("Error al salir:", error);
-        // Si falla el borrado, forzamos la navegación a Auth igualmente
         router.replace('/(auth)');
       }
   };
@@ -143,6 +126,22 @@ export default function NexusScreen() {
       setAlertVisible(true);
   };
 
+  const triggerFlashReset = async () => {
+    if (aiSpeaking) await stopSpeaking();
+    setAiThinking(true);
+    showCyberAlert("RESET ACTIVATED", "Initiating calming protocol...", "warning");
+    try {
+      const token = await getAuthToken();
+      const res = await fetch(`${API_URL}/chat/text`, { 
+        method: 'POST', 
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, 
+        body: JSON.stringify({ text: "EMERGENCY: I feel overwhelmed. I need a quick reset immediately.", mode: "flash" }) 
+      });
+      const data = await res.json();
+      if (data.audio) await playResponse(data.audio);
+    } catch (e) { showCyberAlert("Error", "Offline", "error"); } finally { setAiThinking(false); }
+  };
+
   const triggerMorningProtocol = async () => {
     setAiThinking(true);
     try {
@@ -157,24 +156,7 @@ export default function NexusScreen() {
     } catch (e) { showCyberAlert("Error", "Offline", "error"); } finally { setAiThinking(false); }
   };
 
-  const triggerSilentCheckIn = async () => {
-      if (aiSpeaking) await stopSpeaking();
-      setAiThinking(true);
-      showCyberAlert("Just Be Mode", "Generating comfort field...", "success");
-
-      try {
-          const token = await getAuthToken();
-          const res = await fetch(`${API_URL}/chat/morning`, { 
-              method: 'POST', 
-              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, 
-              body: JSON.stringify({ text: "I need support.", mode: "silent_comfort" }) 
-          });
-          const data = await res.json();
-          if (data.audio) await playResponse(data.audio);
-      } catch (e) { showCyberAlert("Connection Error", "Check internet.", "error"); } finally { setAiThinking(false); }
-  };
-
-  const scheduleNotification = async (date: Date) => {
+  const scheduleNotification = async (date) => {
       try {
         if (Device.isDevice) {
             const { status } = await Notifications.getPermissionsAsync();
@@ -192,8 +174,15 @@ export default function NexusScreen() {
     } catch (error) { showCyberAlert("System Error", "Could not set alarm.", "error"); } finally { setShowTimePicker(false); }
   };
 
-  async function startRecording() {
+  // --- LOGICA DE GRABACIÓN ---
+  
+  async function startRecording(modeOverride = null) {
     if (aiSpeaking) await stopSpeaking();
+    
+    // Guardamos qué modo es
+    recordingModeRef.current = modeOverride || currentMode.id;
+    console.log("🎤 START REC - Modo:", recordingModeRef.current);
+
     try {
       await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
       const { recording } = await Audio.Recording.createAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
@@ -207,21 +196,37 @@ export default function NexusScreen() {
     setIsRecording(false);
     setAiThinking(true); 
     try { if (thinkingSoundRef.current) { await thinkingSoundRef.current.playAsync(); } } catch (e) {}
-
+    
     await recording.stopAndUnloadAsync();
     const uri = recording.getURI(); 
     setRecording(null);
-    if (uri) sendAudioToBackend(uri);
+    
+    // Usamos el modo que inició la grabación
+    const finalMode = recordingModeRef.current;
+    console.log("📤 STOP REC - Enviando con modo:", finalMode);
+
+    if (uri) sendAudioToBackend(uri, finalMode);
   }
 
-  async function sendAudioToBackend(uri: string) {
+  // --- FUNCIÓN INTERRUPTOR PARA EL DIARIO ---
+  const toggleJournalRecording = () => {
+      if (isRecording) {
+          // Si ya estábamos grabando (y se asume que era el diario), paramos
+          stopRecording();
+      } else {
+          // Si no, empezamos en modo Journal
+          startRecording('journal');
+      }
+  };
+
+  async function sendAudioToBackend(uri, mode) {
     try {
       const token = await getAuthToken();
       if (!token) { showCyberAlert("Auth Error", "Please login again", "error"); return; }
       
       const formData = new FormData();
-      formData.append('file', { uri, name: 'voice.m4a', type: 'audio/m4a' } as any);
-      formData.append('mode', currentMode.id); 
+      formData.append('mode', mode); 
+      formData.append('file', { uri, name: 'voice.m4a', type: 'audio/m4a' });
 
       const res = await fetch(`${API_URL}/chat/voice`, { 
         method: 'POST', 
@@ -233,13 +238,10 @@ export default function NexusScreen() {
       if (!res.ok) throw new Error(data.detail || "Server error");
       if (data.audio) playResponse(data.audio);
       
-    } catch (e) { 
-        console.log(e);
-        showCyberAlert("Network Error", "Could not reach Nexus.", "error"); 
-    } finally { setAiThinking(false); }
+    } catch (e) { console.log(e); showCyberAlert("Network Error", "Could not reach Nexus.", "error"); } finally { setAiThinking(false); }
   }
 
-  async function playResponse(base64Audio: string) {
+  async function playResponse(base64Audio) {
     try {
       if (soundRef.current) await soundRef.current.unloadAsync();
       const { sound } = await Audio.Sound.createAsync({ uri: `data:audio/mp3;base64,${base64Audio}` });
@@ -250,7 +252,7 @@ export default function NexusScreen() {
     } catch (e) { console.log(e); }
   }
 
-  const onTimeChange = (event: any, selectedDate?: Date) => {
+  const onTimeChange = (event, selectedDate) => {
     if (event.type === 'dismissed') { setShowTimePicker(false); return; }
     if (Platform.OS === 'android') { setShowTimePicker(false); if (event.type === 'set' && selectedDate) { setAlarmTime(selectedDate); scheduleNotification(selectedDate); } } 
     else { if (selectedDate) setAlarmTime(selectedDate); }
@@ -259,19 +261,17 @@ export default function NexusScreen() {
   return (
     <View style={styles.container}>
       <LinearGradient colors={['#0f172a', '#1e293b', '#000000']} style={StyleSheet.absoluteFill} />
-       
+        
       <View style={styles.header}>
         <View style={{flex: 1}}>
             <Text style={styles.title}>NEXUS</Text>
             <Text style={[styles.subtitle, { color: currentMode.color }]}>{currentMode.label.toUpperCase()} MODE</Text>
             <Text style={styles.modeDesc}>{currentMode.desc}</Text>
         </View>
-
         <View style={{flexDirection: 'row', gap: 15}}>
              <TouchableOpacity style={styles.alarmBtn} onPress={handleLogoutPress}>
                 <Ionicons name="power-outline" size={20} color="#EF4444" />
             </TouchableOpacity>
-
             <TouchableOpacity style={styles.alarmBtn} onPress={() => setShowTimePicker(true)}>
                 <Ionicons name="alarm-outline" size={24} color="white" />
             </TouchableOpacity>
@@ -279,6 +279,7 @@ export default function NexusScreen() {
       </View>
 
       <View style={styles.centerContainer}>
+        {/* ORB VISUALIZACIÓN */}
         <Animated.View style={[styles.orbContainer, { transform: [{ scale: pulseAnim }] }, aiSpeaking && { transform: [{ scale: 1.1 }] }]}>
           <LinearGradient colors={[currentMode.color, 'transparent']} style={styles.orbGradient} start={{ x: 0.5, y: 0.5 }} end={{ x: 1, y: 1 }}>
              <View style={styles.orbCore}>
@@ -292,7 +293,10 @@ export default function NexusScreen() {
         </Animated.View>
         
         <Text style={styles.statusText}>
-          {aiThinking ? "Analysing Consciousness..." : aiSpeaking ? "Broadcasting Response..." : isRecording ? "Recording..." : "Hold mic to speak"}
+          {aiThinking ? "Analysing Consciousness..." : 
+           aiSpeaking ? "Broadcasting Response..." : 
+           isRecording ? (recordingModeRef.current === 'journal' ? "Listening to Journal..." : "Recording...") : 
+           "Select Mode or Reset"}
         </Text>
         
         <View style={styles.modeSelector}>
@@ -304,17 +308,49 @@ export default function NexusScreen() {
       </View>
 
       <View style={styles.bottomControls}>
-          {!aiSpeaking && !isRecording && (
-              <TouchableOpacity style={styles.silentBtn} onPress={triggerSilentCheckIn}>
-                  <Ionicons name="hand-left-outline" size={20} color="#94A3B8" />
-                  <Text style={styles.silentText}>JUST BE</Text>
+          {/* BOTÓN IZQUIERDO: RESET (SIEMPRE ACTIVO) */}
+          {!aiSpeaking && (
+              <TouchableOpacity 
+                style={[styles.sideBtnLeft, { opacity: isRecording ? 0.3 : 1 }]} 
+                onPress={triggerFlashReset} 
+                disabled={isRecording}
+              >
+                  <Ionicons name="flash" size={22} color="#F59E0B" />
+                  <Text style={[styles.sideBtnText, {color: '#F59E0B'}]}>RESET</Text>
               </TouchableOpacity>
           )}
 
+          {/* BOTÓN CENTRAL: MANTENER PULSADO (SOLO SI NO ESTAMOS GRABANDO DIARIO) */}
           {!aiSpeaking && (
-            <TouchableOpacity style={[styles.micButton, isRecording && { backgroundColor: '#EF4444', borderColor: '#EF4444' }]} onPressIn={startRecording} onPressOut={stopRecording}>
-                <Ionicons name={isRecording ? "mic" : "mic-outline"} size={32} color="white" />
+            <TouchableOpacity 
+                style={[
+                    styles.micButton, 
+                    isRecording && recordingModeRef.current !== 'journal' && { backgroundColor: '#EF4444', borderColor: '#EF4444' },
+                    isRecording && recordingModeRef.current === 'journal' && { opacity: 0.2 } // Se atenúa si grabamos diario
+                ]} 
+                onPressIn={() => !isRecording && startRecording(null)} 
+                onPressOut={() => recordingModeRef.current !== 'journal' && stopRecording()}
+                disabled={isRecording && recordingModeRef.current === 'journal'}
+            >
+                <Ionicons name={isRecording && recordingModeRef.current !== 'journal' ? "mic" : "mic-outline"} size={32} color="white" />
             </TouchableOpacity>
+          )}
+
+          {/* BOTÓN DERECHO: DIARIO (INTERRUPTOR ON/OFF) */}
+          {!aiSpeaking && (
+               <TouchableOpacity 
+                    style={[styles.sideBtnRight]} 
+                    onPress={toggleJournalRecording} // <--- AHORA ES CLICK (TOGGLE)
+                >
+                  <Ionicons 
+                    name={isRecording && recordingModeRef.current === 'journal' ? "stop-circle" : "book"} 
+                    size={isRecording && recordingModeRef.current === 'journal' ? 30 : 22} 
+                    color={isRecording && recordingModeRef.current === 'journal' ? "#EF4444" : "#38BDF8"} 
+                  />
+                  <Text style={[styles.sideBtnText, {color: isRecording && recordingModeRef.current === 'journal' ? "#EF4444" : "#38BDF8"}]}>
+                      {isRecording && recordingModeRef.current === 'journal' ? "STOP" : "JOURNAL"}
+                  </Text>
+              </TouchableOpacity>
           )}
 
            {aiSpeaking && (
@@ -355,19 +391,11 @@ export default function NexusScreen() {
                   <Ionicons name="log-out-outline" size={50} color="#EF4444" />
                   <Text style={[styles.alertTitle, { color: '#EF4444' }]}>SEVER LINK?</Text>
                   <Text style={styles.alertBody}>Are you sure you want to disconnect from the Nexus interface?</Text>
-                  
                   <View style={{flexDirection: 'row', gap: 15, marginTop: 10}}>
-                      <TouchableOpacity 
-                          style={[styles.alertBtn, { borderColor: '#64748B', backgroundColor: 'transparent' }]} 
-                          onPress={() => setLogoutVisible(false)}
-                      >
+                      <TouchableOpacity style={[styles.alertBtn, { borderColor: '#64748B', backgroundColor: 'transparent' }]} onPress={() => setLogoutVisible(false)}>
                           <Text style={[styles.alertBtnText, { color: '#64748B' }]}>STAY</Text>
                       </TouchableOpacity>
-
-                      <TouchableOpacity 
-                          style={[styles.alertBtn, { borderColor: '#EF4444', backgroundColor: 'rgba(239, 68, 68, 0.2)' }]} 
-                          onPress={confirmLogout}
-                      >
+                      <TouchableOpacity style={[styles.alertBtn, { borderColor: '#EF4444', backgroundColor: 'rgba(239, 68, 68, 0.2)' }]} onPress={confirmLogout}>
                           <Text style={[styles.alertBtnText, { color: '#EF4444' }]}>DISCONNECT</Text>
                       </TouchableOpacity>
                   </View>
@@ -395,9 +423,10 @@ const styles = StyleSheet.create({
   modeSelector: { flexDirection: 'row', marginTop: 40, gap: 15 },
   modeDot: { width: 12, height: 12, borderRadius: 6 },
   bottomControls: { position: 'absolute', bottom: 50, alignSelf: 'center', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', width: '100%' },
-  micButton: { width: 80, height: 80, borderRadius: 40, backgroundColor: '#1e293b', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#334155' },
-  silentBtn: { position: 'absolute', left: 40, alignItems: 'center', justifyContent: 'center', padding: 10 },
-  silentText: { color: '#64748B', fontSize: 10, marginTop: 5, fontWeight: 'bold' },
+  micButton: { width: 80, height: 80, borderRadius: 40, backgroundColor: '#1e293b', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#334155', zIndex: 10 },
+  sideBtnLeft: { position: 'absolute', left: 40, alignItems: 'center', justifyContent: 'center', padding: 10 },
+  sideBtnRight: { position: 'absolute', right: 40, alignItems: 'center', justifyContent: 'center', padding: 10 },
+  sideBtnText: { fontSize: 10, marginTop: 5, fontWeight: 'bold', letterSpacing: 1 },
   fabStop: { backgroundColor: '#EF4444', flexDirection: 'row', alignItems: 'center', paddingHorizontal: 30, paddingVertical: 15, borderRadius: 30, borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)' },
   fabText: { color: 'white', fontWeight: 'bold', marginLeft: 10, fontSize: 16, letterSpacing: 1 },
   pickerOverlay: { position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, backgroundColor: 'rgba(0,0,0,0.9)', justifyContent: 'center', alignItems: 'center', zIndex: 100 },
