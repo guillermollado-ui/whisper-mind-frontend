@@ -20,7 +20,6 @@ import { LineChart } from 'react-native-chart-kit';
 import * as SecureStore from 'expo-secure-store';
 import { Audio } from 'expo-av'; 
 import AsyncStorage from '@react-native-async-storage/async-storage';
-// --- CORRECCIÓN AQUÍ: Usamos la versión legacy para que funcione writeAsStringAsync ---
 import * as FileSystem from 'expo-file-system/legacy'; 
 import ConfettiCannon from 'react-native-confetti-cannon';
 
@@ -80,7 +79,11 @@ export default function InsightsScreen() {
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [data, setData] = useState(null);
-    const [aliceMessage, setAliceMessage] = useState("System standby. Neural link ready.");
+    
+    // NAVEGACIÓN EMOCIONAL (Nuevos Estados)
+    const [aliceStory, setAliceStory] = useState(null); // { story, core_pattern, archetype }
+    const [aliceMessage, setAliceMessage] = useState("Tap below to see what Alice sees in you this week.");
+    
     const [dailyTasks, setDailyTasks] = useState([]); 
     const [analyzing, setAnalyzing] = useState(false);
     const [sound, setSound] = useState(null);
@@ -91,14 +94,23 @@ export default function InsightsScreen() {
         return await SecureStore.getItemAsync('user_token');
     };
 
-    const loadCachedTasks = async () => {
+    const loadCachedData = async () => {
         try {
             const today = new Date().toDateString();
+            
+            // 1. Cargar Tareas
             const savedTasks = await AsyncStorage.getItem('daily_tasks_cache');
             const savedDate = await AsyncStorage.getItem('daily_tasks_date');
             if (savedDate === today && savedTasks) {
                 setDailyTasks(JSON.parse(savedTasks));
             }
+
+            // 2. Cargar Historia Emocional (Nuevo Cache)
+            const savedStory = await AsyncStorage.getItem('insights_story_cache');
+            if (savedDate === today && savedStory) {
+                setAliceStory(JSON.parse(savedStory));
+            }
+
         } catch (e) { console.log("Cache error", e); }
     };
 
@@ -106,7 +118,6 @@ export default function InsightsScreen() {
         const updatedTasks = dailyTasks.map(task => {
             if (task.id === id) {
                 const isNowCompleted = !task.completed;
-                // Disparar confeti si se completa
                 if (isNowCompleted && confettiRef.current) {
                     confettiRef.current.start();
                 }
@@ -115,6 +126,7 @@ export default function InsightsScreen() {
             return task;
         });
         setDailyTasks(updatedTasks);
+        // CORREGIDO AQUÍ: Quitada la palabra "Async" extra
         AsyncStorage.setItem('daily_tasks_cache', JSON.stringify(updatedTasks));
     };
 
@@ -127,7 +139,6 @@ export default function InsightsScreen() {
             let uri = '';
             if (audioData.startsWith('http')) uri = audioData;
             else {
-                // Usamos FileSystem (legacy) para guardar el archivo temporalmente
                 uri = FileSystem.cacheDirectory + 'alice_voice.mp3';
                 await FileSystem.writeAsStringAsync(uri, audioData, { encoding: 'base64' });
             }
@@ -164,7 +175,6 @@ export default function InsightsScreen() {
 
     const runAliceAnalysis = async (currentData) => {
         setAnalyzing(true);
-        setDailyTasks([]); 
         if (sound) await sound.unloadAsync();
         setIsPlaying(false);
         try {
@@ -183,15 +193,26 @@ export default function InsightsScreen() {
 
             const responseData = await res.json();
             if (res.ok) {
-                // Actualiza el mensaje principal de Alice
-                setAliceMessage(responseData.text);
+                // 1. Guardar la Historia Emocional
+                const newStory = {
+                    story: responseData.story || responseData.text, // Fallback si el backend aun no manda story
+                    core_pattern: responseData.core_pattern || "Finding your rhythm.",
+                    archetype: responseData.archetype || { name: "The Observer", description: "Watching before acting." }
+                };
                 
-                // Reproduce audio si existe
+                setAliceStory(newStory);
+                setAliceMessage(responseData.analysis_text || responseData.text);
+                
+                // Cachear la historia
+                const today = new Date().toDateString();
+                await AsyncStorage.setItem('insights_story_cache', JSON.stringify(newStory));
+                await AsyncStorage.setItem('daily_tasks_date', today);
+
+                // 2. Audio
                 if (responseData.audio) playAudioData(responseData.audio);
                 
-                // Procesa las tareas estructuradas
+                // 3. Tareas
                 if (responseData.tasks && Array.isArray(responseData.tasks)) {
-                    const today = new Date().toDateString();
                     const timestamp = Date.now();
                     const newTasks = responseData.tasks.map((t, i) => ({
                         id: `task_${timestamp}_${i}`,
@@ -204,7 +225,6 @@ export default function InsightsScreen() {
                     }));
                     setDailyTasks(newTasks);
                     await AsyncStorage.setItem('daily_tasks_cache', JSON.stringify(newTasks));
-                    await AsyncStorage.setItem('daily_tasks_date', today);
                 }
             } else { setAliceMessage("Neural link unstable."); }
         } catch (e) { Alert.alert("Connection Error", e.message); } finally { setAnalyzing(false); }
@@ -219,11 +239,9 @@ export default function InsightsScreen() {
 
     const navigateToTask = async (route, taskId) => {
         const today = new Date().toDateString();
-        // Guardamos metadatos de que el usuario 'inició' la tarea
         if (route === '/vault') await AsyncStorage.setItem('last_vault_visit', today);
         else if (route === '/') await AsyncStorage.setItem('last_chat_interaction', today);
         
-        // Navegación
         if (route === '/') router.replace('/'); 
         else if (route === '/vault') router.replace('/vault');
     };
@@ -231,7 +249,7 @@ export default function InsightsScreen() {
     useFocusEffect(useCallback(() => { 
         const load = async () => {
             const d = await fetchInsights();
-            if (!analyzing) await loadCachedTasks(); 
+            if (!analyzing) await loadCachedData(); 
         };
         load();
         return () => { if(sound) sound.unloadAsync(); };
@@ -251,12 +269,11 @@ export default function InsightsScreen() {
 
     return (
         <View style={styles.container}>
-            {/* 1. EL FONDO (Capa más baja) */}
             <LinearGradient colors={['#0f172a', '#000000']} style={StyleSheet.absoluteFill} />
             
             <View style={styles.header}>
                 <Text style={styles.headerTitle}>INSIGHTS</Text>
-                <Text style={styles.headerSubtitle}>NEURAL PATTERNS & PROTOCOLS</Text>
+                <Text style={styles.headerSubtitle}>YOUR EMOTIONAL BLUEPRINT</Text>
             </View>
 
             <ScrollView 
@@ -267,37 +284,108 @@ export default function InsightsScreen() {
                     <ActivityIndicator size="large" color="#38BDF8" style={{marginTop: 50}} />
                 ) : (
                     <>
-                        {/* ALICE ANALYST CARD */}
-                        <LinearGradient colors={['rgba(16, 185, 129, 0.1)', 'rgba(16, 185, 129, 0.05)']} style={styles.aliceCard}>
-                            <View style={styles.aliceHeader}>
-                                <Ionicons name={isPlaying ? "pulse" : "hardware-chip-outline"} size={20} color={isPlaying ? "#38BDF8" : "#10B981"} />
-                                <Text style={[styles.aliceTitle, isPlaying && {color: "#38BDF8"}]}>
-                                    {isPlaying ? "VOICE UPLINK ACTIVE" : "ALICE ANALYST"}
-                                </Text>
-                            </View>
-                            
-                            {analyzing ? (
-                                <View style={{flexDirection:'row', alignItems:'center', gap:10, marginBottom:15}}>
-                                    <ActivityIndicator color="#10B981" size="small" />
-                                    <Text style={styles.analyzingText}>Analyzing neural patterns...</Text>
+                        {/* --- BLOQUE 1: YOUR EMOTIONAL STORY (NUEVO UI WOW) --- */}
+                        <LinearGradient 
+                            colors={['#1e293b', '#0f172a']} 
+                            style={styles.storyCard}
+                        >
+                            {/* CABECERA CON ARQUETIPO */}
+                            <View style={styles.archetypeHeader}>
+                                <View>
+                                    <Text style={styles.storyLabel}>THIS WEEK'S ARCHETYPE</Text>
+                                    <Text style={styles.archetypeTitle}>
+                                        {aliceStory?.archetype?.name || "The Unwritten Story"}
+                                    </Text>
+                                    <Text style={styles.archetypeDesc}>
+                                        {aliceStory?.archetype?.description || "Tap the button below to discover who you've been this week."}
+                                    </Text>
                                 </View>
-                            ) : (
-                                <ExpandableAliceText text={aliceMessage} />
+                                <Ionicons name="finger-print-outline" size={40} color="rgba(56, 189, 248, 0.3)" />
+                            </View>
+
+                            <View style={styles.divider} />
+
+                            {/* CORE PATTERN HIGHLIGHT */}
+                            {aliceStory?.core_pattern && (
+                                <View style={styles.patternBox}>
+                                    <Ionicons name="key-outline" size={16} color="#F59E0B" />
+                                    <Text style={styles.patternText}>
+                                        "{aliceStory.core_pattern}"
+                                    </Text>
+                                </View>
                             )}
 
+                            {/* HISTORIA NARRATIVA */}
+                            {analyzing ? (
+                                <View style={{flexDirection:'row', alignItems:'center', gap:10, paddingVertical: 20}}>
+                                    <ActivityIndicator color="#10B981" size="small" />
+                                    <Text style={styles.analyzingText}>Reading your nervous system...</Text>
+                                </View>
+                            ) : (
+                                <View style={{marginTop: 15}}>
+                                    <ExpandableAliceText text={aliceStory?.story || aliceMessage} />
+                                </View>
+                            )}
+
+                            {/* BOTÓN MÁGICO REBAUTIZADO */}
                             <TouchableOpacity 
                                 style={[styles.analyzeBtn, isPlaying && {borderColor: '#38BDF8', backgroundColor: 'rgba(56, 189, 248, 0.1)'}]} 
                                 onPress={handleManualAnalyze} disabled={analyzing}
                             >
+                                <Ionicons name={isPlaying ? "volume-high" : "eye-outline"} size={16} color={isPlaying ? "#38BDF8" : "#10B981"} style={{marginRight: 8}} />
                                 <Text style={[styles.analyzeBtnText, isPlaying && {color: '#38BDF8'}]}>
-                                    {analyzing ? "GENERATING PROTOCOLS..." : "RUN FULL DIAGNOSTICS"}
+                                    {analyzing ? "CONNECTING..." : isPlaying ? "LISTENING TO ALICE" : "SEE WHAT ALICE SEES"}
                                 </Text>
                             </TouchableOpacity>
                         </LinearGradient>
 
-                        {/* TAREAS */}
+
+                        {/* --- BLOQUE 2: GRÁFICOS (RENOMBRADOS) --- */}
+                        
+                        {/* SISMÓGRAFO */}
+                        <View style={styles.card}>
+                            <View style={styles.cardHeader}>
+                                <Ionicons name="pulse-outline" size={20} color="#38BDF8" />
+                                <Text style={styles.cardTitle}>NERVOUS SYSTEM RHYTHM</Text>
+                            </View>
+                            {data.mood_trend && data.mood_trend.length > 1 ? (
+                                <LineChart 
+                                    data={{ labels: [], datasets: [{ data: data.mood_trend }] }} 
+                                    width={SCREEN_WIDTH - 60} height={200} 
+                                    yAxisLabel="" yAxisSuffix="" 
+                                    chartConfig={chartConfig} 
+                                    bezier 
+                                    style={styles.chart} 
+                                />
+                            ) : (<View style={styles.emptyState}><Text style={styles.emptyText}>Not enough data points.</Text></View>)}
+                        </View>
+
+                        {/* ESPECTRO EMOCIONAL */}
+                        <View style={styles.card}>
+                            <View style={styles.cardHeader}>
+                                <Ionicons name="prism-outline" size={20} color="#F59E0B" />
+                                <Text style={[styles.cardTitle, { color: '#F59E0B' }]}>WHAT'S LIVING INSIDE YOU</Text>
+                            </View>
+                            {data.category_distribution ? (
+                                <View style={{ marginTop: 10 }}>
+                                    {Object.entries(data.category_distribution).map(([label, value], i) => (
+                                        <HorizontalBar 
+                                            key={i} 
+                                            label={label} 
+                                            value={value} 
+                                            maxValue={5} 
+                                            color="#F59E0B"
+                                        />
+                                    ))}
+                                </View>
+                            ) : (
+                                <View style={styles.emptyState}><Text style={styles.emptyText}>No emotional data yet.</Text></View>
+                            )}
+                        </View>
+
+                        {/* --- BLOQUE 3: PROTOCOLOS (TAREAS) --- */}
                         <View style={styles.tasksContainer}>
-                            <Text style={styles.sectionTitle}>GENERATED PROTOCOLS</Text>
+                            <Text style={styles.sectionTitle}>ALIGNMENT PROTOCOLS</Text>
                             {dailyTasks.length > 0 ? dailyTasks.map((task, index) => (
                                 <View key={task.id || index} style={[styles.taskCard, task.completed && styles.taskCardDone]}>
                                     <View style={styles.taskHeaderRow}>
@@ -332,48 +420,7 @@ export default function InsightsScreen() {
                                     )}
                                 </View>
                             )) : (
-                                <Text style={styles.emptyText}>Awaiting diagnostics run...</Text>
-                            )}
-                        </View>
-
-                        {/* SISMÓGRAFO */}
-                        <View style={styles.card}>
-                            <View style={styles.cardHeader}>
-                                <Ionicons name="pulse-outline" size={20} color="#38BDF8" />
-                                <Text style={styles.cardTitle}>MOOD SEISMOGRAPH</Text>
-                            </View>
-                            {data.mood_trend && data.mood_trend.length > 1 ? (
-                                <LineChart 
-                                    data={{ labels: [], datasets: [{ data: data.mood_trend }] }} 
-                                    width={SCREEN_WIDTH - 60} height={200} 
-                                    yAxisLabel="" yAxisSuffix="" 
-                                    chartConfig={chartConfig} 
-                                    bezier 
-                                    style={styles.chart} 
-                                />
-                            ) : (<View style={styles.emptyState}><Text style={styles.emptyText}>Not enough data points.</Text></View>)}
-                        </View>
-
-                        {/* GRÁFICO BARRAS NARANJAS */}
-                        <View style={styles.card}>
-                            <View style={styles.cardHeader}>
-                                <Ionicons name="stats-chart-outline" size={20} color="#F59E0B" />
-                                <Text style={[styles.cardTitle, { color: '#F59E0B' }]}>EMOTIONAL SPECTRUM</Text>
-                            </View>
-                            {data.category_distribution ? (
-                                <View style={{ marginTop: 10 }}>
-                                    {Object.entries(data.category_distribution).map(([label, value], i) => (
-                                        <HorizontalBar 
-                                            key={i} 
-                                            label={label} 
-                                            value={value} 
-                                            maxValue={5} 
-                                            color="#F59E0B"
-                                        />
-                                    ))}
-                                </View>
-                            ) : (
-                                <View style={styles.emptyState}><Text style={styles.emptyText}>No emotional data yet.</Text></View>
+                                <Text style={styles.emptyText}>Waiting for Alice's input...</Text>
                             )}
                         </View>
                     </>
@@ -381,7 +428,6 @@ export default function InsightsScreen() {
                 <View style={{height: 100}} /> 
             </ScrollView>
 
-            {/* 2. EL CONFETI (VISUALMENTE ARRIBA) */}
             <ConfettiCannon 
                 count={200} 
                 origin={{x: -10, y: 0}} 
@@ -401,13 +447,23 @@ const styles = StyleSheet.create({
     headerTitle: { fontSize: 28, fontWeight: '900', color: 'white', letterSpacing: 1 },
     headerSubtitle: { fontSize: 10, color: '#64748B', letterSpacing: 3, marginTop: 5 },
     scrollContent: { paddingHorizontal: 20 },
-    aliceCard: { padding: 20, borderRadius: 16, marginBottom: 25, borderWidth: 1, borderColor: 'rgba(16, 185, 129, 0.3)' },
-    aliceHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 },
-    aliceTitle: { color: '#10B981', fontWeight: 'bold', fontSize: 12, letterSpacing: 1 },
-    aliceText: { color: '#E2E8F0', fontSize: 16, fontStyle: 'italic', lineHeight: 24, marginBottom: 15 },
-    analyzingText: { color: '#64748B', fontSize: 14, fontStyle: 'italic', marginBottom: 15 },
-    analyzeBtn: { backgroundColor: 'rgba(16, 185, 129, 0.2)', paddingVertical: 10, borderRadius: 8, alignItems: 'center', borderWidth: 1, borderColor: '#10B981' },
-    analyzeBtnText: { color: '#10B981', fontWeight: 'bold', fontSize: 10, letterSpacing: 1 },
+    
+    // ESTILOS NUEVOS STORY CARD (WOW EFFECT)
+    storyCard: { padding: 20, borderRadius: 20, marginBottom: 30, borderWidth: 1, borderColor: 'rgba(56, 189, 248, 0.2)' },
+    archetypeHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
+    storyLabel: { color: '#64748B', fontSize: 10, fontWeight: 'bold', letterSpacing: 1, marginBottom: 5 },
+    archetypeTitle: { color: '#38BDF8', fontSize: 22, fontWeight: '900', letterSpacing: 0.5, marginBottom: 5 },
+    archetypeDesc: { color: '#94A3B8', fontSize: 14, fontStyle: 'italic', maxWidth: '90%' },
+    
+    patternBox: { backgroundColor: 'rgba(245, 158, 11, 0.1)', padding: 12, borderRadius: 10, flexDirection: 'row', gap: 10, alignItems: 'center', marginBottom: 15 },
+    patternText: { color: '#F59E0B', fontSize: 13, fontWeight: 'bold', fontStyle: 'italic', flex: 1 },
+    
+    aliceText: { color: '#E2E8F0', fontSize: 15, lineHeight: 24, marginBottom: 15 },
+    analyzingText: { color: '#64748B', fontSize: 14, fontStyle: 'italic' },
+    
+    analyzeBtn: { marginTop: 10, backgroundColor: 'rgba(16, 185, 129, 0.1)', paddingVertical: 14, borderRadius: 12, alignItems: 'center', borderWidth: 1, borderColor: '#10B981', flexDirection: 'row', justifyContent: 'center' },
+    analyzeBtnText: { color: '#10B981', fontWeight: 'bold', fontSize: 12, letterSpacing: 1 },
+
     tasksContainer: { marginBottom: 30 },
     sectionTitle: { color: '#64748B', fontSize: 10, letterSpacing: 2, marginBottom: 15, fontWeight: 'bold' },
     taskCard: { backgroundColor: '#1e293b', borderRadius: 12, marginBottom: 10, borderWidth: 1, borderColor: '#334155', overflow: 'hidden' },
@@ -420,10 +476,11 @@ const styles = StyleSheet.create({
     taskTime: { color: '#64748B', fontSize: 10, marginTop: 2 },
     expandBtn: { padding: 5 },
     taskBody: { paddingHorizontal: 15, paddingBottom: 15 },
-    divider: { height: 1, backgroundColor: 'rgba(255,255,255,0.1)', marginBottom: 10 },
+    divider: { height: 1, backgroundColor: 'rgba(255,255,255,0.1)', marginBottom: 10, marginTop: 10 },
     taskDesc: { color: '#94A3B8', fontSize: 13, lineHeight: 20, marginBottom: 15 },
     actionLink: { flexDirection: 'row', alignItems: 'center', gap: 5, alignSelf: 'flex-start', paddingVertical: 5, paddingHorizontal: 10, backgroundColor: 'rgba(56, 189, 248, 0.1)', borderRadius: 6 },
     actionLinkText: { color: '#38BDF8', fontSize: 10, fontWeight: 'bold', letterSpacing: 1 },
+    
     card: { backgroundColor: '#1e293b', borderRadius: 20, padding: 20, marginBottom: 20, borderWidth: 1, borderColor: '#334155' },
     cardHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 20 },
     cardTitle: { color: '#38BDF8', fontSize: 14, fontWeight: 'bold', letterSpacing: 1 },
