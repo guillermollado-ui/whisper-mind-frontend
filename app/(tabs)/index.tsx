@@ -300,11 +300,23 @@ export default function NexusScreen() {
         </Text>
         
         <View style={styles.modeSelector}>
-          {MODES.map((m) => (
-            <TouchableOpacity key={m.id} onPress={() => setCurrentMode(m)}
-              style={[styles.modeDot, { backgroundColor: m.color, opacity: currentMode.id === m.id ? 1 : 0.3, transform: [{ scale: currentMode.id === m.id ? 1.3 : 1 }] }]} />
-          ))}
-        </View>
+  {MODES.map((m) => (
+    <TouchableOpacity 
+      key={m.id} 
+      onPress={() => setCurrentMode(m)}
+      // 🎯 hitSlop: hace que el área "invisible" de toque sea mayor
+      hitSlop={{ top: 15, bottom: 15, left: 10, right: 10 }}
+      style={[
+        styles.modeDot, 
+        { 
+          backgroundColor: m.color, 
+          opacity: currentMode.id === m.id ? 1 : 0.3, 
+          transform: [{ scale: currentMode.id === m.id ? 1.3 : 1 }] 
+        }
+      ]} 
+    />
+  ))}
+</View>
       </View>
 
       <View style={styles.bottomControls}>
