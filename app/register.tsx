@@ -8,7 +8,6 @@ import {
     ActivityIndicator,
     KeyboardAvoidingView,
     Platform,
-    Linking,
     Modal
 } from 'react-native';
 import { useRouter } from 'expo-router';
@@ -17,7 +16,6 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as SecureStore from 'expo-secure-store';
 
 const API_URL = 'https://wishpermind-backend.onrender.com';
-const LEMON_SQUEEZY_URL = 'https://google.com'; 
 
 export default function RegisterScreen() {
     const router = useRouter();
@@ -99,11 +97,10 @@ export default function RegisterScreen() {
     const closeAlert = () => {
         setAlertVisible(false);
         if (alertConfig.type === 'success') {
+            // AQUÍ ES DONDE IREMOS AL ONBOARDING
             router.replace('/(auth)/onboarding');
         }
     };
-
-    const openPayment = () => { Linking.openURL(LEMON_SQUEEZY_URL); };
 
     return (
         <View style={styles.container}>
@@ -146,10 +143,6 @@ export default function RegisterScreen() {
                     <TouchableOpacity style={[styles.registerBtn, !disclaimerAccepted && {opacity: 0.5}]} onPress={handleRegister} disabled={loading}>
                         {loading ? <ActivityIndicator color="#000" /> : <Text style={styles.registerBtnText}>ESTABLISH PROTOCOL</Text>}
                     </TouchableOpacity>
-
-                    <TouchableOpacity style={styles.founderBtn} onPress={openPayment}>
-                         <Text style={styles.founderText}>💎  GET FOUNDER PASS</Text>
-                    </TouchableOpacity>
                 </View>
             </KeyboardAvoidingView>
 
@@ -191,8 +184,6 @@ const styles = StyleSheet.create({
     disclaimerText: { color: '#94A3B8', fontSize: 12, flex: 1 },
     registerBtn: { backgroundColor: '#10B981', borderRadius: 12, height: 55, justifyContent: 'center', alignItems: 'center', marginBottom: 15 },
     registerBtnText: { color: '#000', fontSize: 16, fontWeight: 'bold', letterSpacing: 1 },
-    founderBtn: { borderWidth: 1, borderColor: '#ca8a04', borderRadius: 12, height: 45, justifyContent: 'center', alignItems: 'center', marginBottom: 20, backgroundColor: 'rgba(202, 138, 4, 0.1)' },
-    founderText: { color: '#facc15', fontSize: 12, fontWeight: 'bold', letterSpacing: 1 },
     
     // --- ESTILOS MODAL NARANJA ---
     modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', alignItems: 'center' },
