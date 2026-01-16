@@ -16,15 +16,16 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
-
-import { shareImage } from '../../src/services/shareService';
+// 🆕 Imports corregidos para las versiones más recientes de Expo
+import * as Sharing from 'expo-sharing';
+import * as FileSystem from 'expo-file-system/legacy';
 
 const API_URL = 'https://wishpermind-backend.onrender.com';
 
 // --- COLORES DE MODOS ---
 const MODE_COLORS = {
-    default: '#38BDF8', calm: '#10B981', win: '#F59E0B', sleep: '#8B5CF6', 
-    dream: '#6366F1', morning: '#F472B6', flash: '#EF4444', journal: '#0EA5E9'
+  default: '#38BDF8', calm: '#10B981', win: '#F59E0B', sleep: '#8B5CF6', 
+  dream: '#6366F1', morning: '#F472B6', flash: '#EF4444', journal: '#0EA5E9'
 };
 
 // --- ARQUETIPOS ---
@@ -69,12 +70,10 @@ export default function VaultScreen() {
   const [chatItems, setChatItems] = useState([]);   
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  
-  // PAGINACIÓN
   const [displayLimit, setDisplayLimit] = useState(10);
 
   useEffect(() => {
-      setDisplayLimit(10);
+    setDisplayLimit(10);
   }, [activeTab]);
   
   const totalMemories = vaultItems.length + chatItems.length;
@@ -85,17 +84,23 @@ export default function VaultScreen() {
     return await SecureStore.getItemAsync('user_token');
   };
 
+  // 🆕 FUNCIÓN PARA FORMATEAR LA URL DE LA IMAGEN
+  const getImageUrl = (url) => {
+    if (!url) return null;
+    if (url.startsWith('data:image')) return url; // Base64 antiguo
+    if (url.startsWith('/images/')) return `${API_URL}${url}`; // Nuevo GridFS
+    return url;
+  };
+
   const fetchAllData = async () => {
     try {
       const token = await getAuthToken();
       if (!token) { setLoading(false); return; }
 
-      // 1. CARGAR GALERÍA
       const resVault = await fetch(`${API_URL}/vault`, { headers: { 'Authorization': `Bearer ${token}` } });
       const dataVault = await resVault.json();
       if (resVault.ok) setVaultItems(dataVault);
 
-      // 2. CARGAR HISTORIAL
       const resChat = await fetch(`${API_URL}/chat/history`, { headers: { 'Authorization': `Bearer ${token}` } });
       const dataChat = await resChat.json();
       if (resChat.ok) {
@@ -108,7 +113,6 @@ export default function VaultScreen() {
   useFocusEffect(useCallback(() => { fetchAllData(); }, []));
   const onRefresh = () => { setRefreshing(true); fetchAllData(); };
 
-  // --- LÓGICA DE DATOS VISIBLES ---
   const getAllDataForTab = () => {
       if (activeTab === 'chats') return chatItems;
       return vaultItems.filter(item => {
@@ -125,15 +129,44 @@ export default function VaultScreen() {
       setDisplayLimit(prev => prev + 10);
   };
 
-  const handleShareImage = async (url) => { await shareImage(url, url.startsWith('data:')); };
+  // 🆕 LÓGICA DE COMPARTIR ACTUALIZADA A EXPO LEGACY
+  const handleShareImage = async (url) => {
+    try {
+      const finalUrl = getImageUrl(url);
+      if (!finalUrl) {
+          Alert.alert("Error", "No image found to share.");
+          return;
+      }
+
+      const filename = FileSystem.cacheDirectory + "whisper_memory.png";
+
+      if (finalUrl.startsWith('data:image')) {
+        const base64Data = finalUrl.split('base64,')[1];
+        await FileSystem.writeAsStringAsync(filename, base64Data, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+        await Sharing.shareAsync(filename);
+      } else {
+        const download = await FileSystem.downloadAsync(finalUrl, filename);
+        if (download.status === 200) {
+          await Sharing.shareAsync(download.uri, {
+            mimeType: 'image/png',
+            dialogTitle: 'Share your Whisper Mind memory',
+            UTI: 'public.png'
+          });
+        }
+      }
+    } catch (error) {
+      console.error("Error sharing image:", error);
+      Alert.alert("Export Error", "Alice couldn't prepare the image. Please try again.");
+    }
+  };
+
   const handleShareText = async (text, title) => { try { await Share.share({ message: `${title}\n\n${text}` }); } catch (error) { Alert.alert("Error sharing"); } };
 
-  // --- RENDER VISUAL CARD (FECHA BONITA AÑADIDA) ---
   const renderVisualCard = ({ item }) => {
     const isJournal = activeTab === 'journal';
     const accentColor = isJournal ? '#38BDF8' : '#6366F1'; 
-    
-    // FORMATO DE FECHA BONITO
     const dateObj = new Date(item.date);
     const dayNum = dateObj.getDate();
     const monthStr = dateObj.toLocaleDateString(undefined, { month: 'short' }).toUpperCase();
@@ -143,13 +176,10 @@ export default function VaultScreen() {
     return (
         <View style={[styles.cardContainer, { borderLeftColor: accentColor }]}>
             <View style={styles.cardHeader}>
-                {/* LADO IZQUIERDO: ETIQUETA */}
                 <View style={{flexDirection: 'row', alignItems: 'center', gap: 8}}>
                     <View style={[styles.dot, { backgroundColor: accentColor }]} />
                     <Text style={[styles.cardTag, { color: accentColor }]}>{activeTab.toUpperCase()}</Text>
                 </View>
-
-                {/* LADO DERECHO: FECHA BONITA */}
                 <View style={styles.dateBadge}>
                     <Text style={styles.dateDay}>{dayNum}</Text>
                     <View style={{alignItems: 'flex-start'}}>
@@ -160,9 +190,7 @@ export default function VaultScreen() {
             </View>
 
             <View style={styles.textContainer}>
-                {/* ✅ CAMBIO CLAVE: Usamos summary (interpretación) también para Dream, con fallback a prompt */}
                 <ExpandableText text={item.summary || item.prompt} color={accentColor} />
-                
                 {isJournal && item.action && (
                     <View style={styles.actionBox}>
                         <Ionicons name="bulb-outline" size={14} color="#F59E0B" />
@@ -172,7 +200,7 @@ export default function VaultScreen() {
             </View>
 
             <View style={styles.imageWrapper}>
-                <Image source={{ uri: item.image_url || item.url }} style={styles.cardImage} />
+                <Image source={{ uri: getImageUrl(item.image_url || item.url) }} style={styles.cardImage} />
                 <View style={styles.imageOverlay}>
                     <Ionicons name="color-palette" size={12} color="white" />
                     <Text style={styles.imageTag}>{isJournal ? "EMOTIONAL ART" : "DREAM ART"}</Text>
@@ -222,7 +250,6 @@ export default function VaultScreen() {
   return (
     <View style={styles.container}>
       <LinearGradient colors={['#0f172a', '#000000']} style={StyleSheet.absoluteFill} />
-      
       <View style={styles.header}>
         <Text style={styles.headerTitle}>THE VAULT</Text>
         <Text style={styles.headerSubtitle}>MEMORY ARCHIVE</Text>
@@ -234,10 +261,8 @@ export default function VaultScreen() {
         keyExtractor={(item, index) => index.toString()}
         contentContainerStyle={styles.listContent}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#fff" />}
-        
         ListHeaderComponent={
             <>
-                {/* ARQUETIPO */}
                 <LinearGradient colors={['rgba(30, 41, 59, 0.8)', 'rgba(15, 23, 42, 0.8)']} style={styles.archetypeCard}>
                     <View style={styles.archHeader}>
                         <Ionicons name={currentArchetype.icon} size={32} color={currentArchetype.color} />
@@ -253,18 +278,15 @@ export default function VaultScreen() {
                     <Text style={styles.statsText}>{totalMemories} Memories Stored</Text>
                 </LinearGradient>
 
-                {/* TABS */}
                 <View style={styles.tabsContainer}>
                     <TouchableOpacity style={[styles.tab, activeTab === 'journal' && styles.activeTab]} onPress={() => setActiveTab('journal')}>
                         <Ionicons name="book-outline" size={16} color={activeTab === 'journal' ? '#38BDF8' : '#64748B'} />
                         <Text style={[styles.tabText, activeTab === 'journal' && styles.activeTabText]}>JOURNAL</Text>
                     </TouchableOpacity>
-
                     <TouchableOpacity style={[styles.tab, activeTab === 'dream' && styles.activeTabDream]} onPress={() => setActiveTab('dream')}>
                         <Ionicons name="moon-outline" size={16} color={activeTab === 'dream' ? '#6366F1' : '#64748B'} />
                         <Text style={[styles.tabText, activeTab === 'dream' && styles.activeTabTextDream]}>DREAMS</Text>
                     </TouchableOpacity>
-
                     <TouchableOpacity style={[styles.tab, activeTab === 'chats' && styles.activeTabChat]} onPress={() => setActiveTab('chats')}>
                         <Ionicons name="chatbubbles-outline" size={16} color={activeTab === 'chats' ? '#94A3B8' : '#64748B'} />
                         <Text style={[styles.tabText, activeTab === 'chats' && styles.activeTabTextChat]}>LOGS</Text>
@@ -272,7 +294,6 @@ export default function VaultScreen() {
                 </View>
             </>
         }
-        
         ListEmptyComponent={
             !loading && (
                 <View style={styles.emptyState}>
@@ -281,7 +302,6 @@ export default function VaultScreen() {
                 </View>
             )
         }
-
         ListFooterComponent={
              showLoadMore && (
                  <TouchableOpacity style={styles.loadMoreBtn} onPress={handleLoadMore}>
@@ -301,7 +321,6 @@ const styles = StyleSheet.create({
   headerTitle: { fontSize: 28, fontWeight: '900', color: 'white', letterSpacing: 1 },
   headerSubtitle: { fontSize: 10, color: '#64748B', letterSpacing: 3, marginTop: 5 },
   listContent: { paddingHorizontal: 20, paddingBottom: 100 },
-
   archetypeCard: { padding: 20, borderRadius: 20, marginBottom: 25, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
   archHeader: { flexDirection: 'row', alignItems: 'center' },
   archTitle: { fontSize: 18, fontWeight: 'bold', letterSpacing: 1 },
@@ -310,7 +329,6 @@ const styles = StyleSheet.create({
   progressBar: { height: 4, backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 2, marginTop: 15, overflow: 'hidden' },
   progressFill: { height: '100%' },
   statsText: { color: '#64748B', fontSize: 10, marginTop: 8, textAlign: 'right' },
-
   tabsContainer: { flexDirection: 'row', marginBottom: 20, gap: 10 },
   tab: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 10, borderRadius: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', backgroundColor: 'rgba(30, 41, 59, 0.3)' },
   activeTab: { borderColor: '#38BDF8', backgroundColor: 'rgba(56, 189, 248, 0.1)' },
@@ -320,21 +338,15 @@ const styles = StyleSheet.create({
   activeTabChat: { borderColor: '#94A3B8', backgroundColor: 'rgba(148, 163, 184, 0.1)' },
   activeTabTextChat: { color: '#E2E8F0' },
   tabText: { color: '#64748B', fontSize: 10, fontWeight: 'bold', letterSpacing: 1 },
-
   cardContainer: { backgroundColor: 'rgba(30, 41, 59, 0.4)', borderRadius: 16, marginBottom: 20, borderLeftWidth: 4, borderWidth: 1, borderColor: 'rgba(255,255,255,0.05)', overflow: 'hidden' },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 15, paddingBottom: 5 },
   dot: { width: 6, height: 6, borderRadius: 3 },
   cardTag: { fontSize: 10, fontWeight: '900', letterSpacing: 1 },
-  
-  // --- NUEVOS ESTILOS PARA LA FECHA BONITA ---
   dateBadge: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   dateDay: { color: 'white', fontSize: 24, fontWeight: 'bold' },
   dateMonth: { color: '#E2E8F0', fontSize: 12, fontWeight: '800', letterSpacing: 1 },
   dateTime: { color: '#94A3B8', fontSize: 10, fontWeight: '500' },
-  // -------------------------------------------
-
-  dateTextSimple: { color: '#64748B', fontSize: 10 }, // Para los chats normales
-
+  dateTextSimple: { color: '#64748B', fontSize: 10 },
   textContainer: { paddingHorizontal: 15, paddingBottom: 15 },
   summaryText: { color: '#E2E8F0', fontSize: 14, lineHeight: 22 },
   actionBox: { marginTop: 10, flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: 'rgba(245, 158, 11, 0.1)', padding: 10, borderRadius: 8 },
@@ -346,16 +358,13 @@ const styles = StyleSheet.create({
   cardFooter: { flexDirection: 'row', borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.05)', padding: 12 },
   footerBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
   footerBtnText: { color: '#94A3B8', fontSize: 10, fontWeight: 'bold', letterSpacing: 1 },
-
   chatCard: { backgroundColor: 'rgba(15, 23, 42, 0.6)', borderRadius: 12, marginBottom: 15, padding: 15, borderLeftWidth: 3, borderWidth: 1, borderColor: 'rgba(255,255,255,0.05)' },
   badgeContainer: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   modeLabel: { fontWeight: 'bold', fontSize: 10, letterSpacing: 1 },
   actionsBarChat: { marginTop: 10, alignItems: 'flex-end' },
   actionBtn: { padding: 5 },
-
   emptyState: { alignItems: 'center', marginTop: 50 },
   emptyText: { color: '#475569', marginTop: 10 },
-
   loadMoreBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 20, marginBottom: 20 },
   loadMoreText: { color: '#94A3B8', fontSize: 12, fontWeight: 'bold', letterSpacing: 1 }
 });
