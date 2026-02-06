@@ -1,81 +1,118 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, Alert, ActivityIndicator, StyleSheet, KeyboardAvoidingView, Platform, Image } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, ActivityIndicator, StyleSheet, KeyboardAvoidingView, Platform, Image } from 'react-native';
 import { useRouter, Link } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
 import { StatusBar } from 'expo-status-bar';
+import { API_URL } from '../../utils/api';
+// ✅ IMPORTAMOS EL SISTEMA DE ALERTAS
+import { useAlert } from '../../src/context/AlertContext';
+
+// 📂 Cargar la imagen del logo
+const LOGO_IMAGE = require('@/assets/icon.png'); 
 
 export default function LoginScreen() {
+  const router = useRouter();
+  // ✅ USAMOS EL HOOK DE ALERTAS
+  const { showAlert } = useAlert();
+
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
-  const router = useRouter();
-
-  const API_URL = 'https://wishpermind-backend.onrender.com'; 
 
   const handleLogin = async () => {
     if (!email.trim() || !password.trim()) {
-      Alert.alert('Error', 'Please fill in all fields');
+      showAlert('MISSING DATA', 'Please fill in all fields.', 'warning');
       return;
     }
 
     setLoading(true);
     try {
-      // PREPARACIÓN DE DATOS PARA FASTAPI (OAuth2 Standard)
       const formData = new URLSearchParams();
       formData.append('username', email.toLowerCase().trim());
       formData.append('password', password);
 
       const response = await fetch(`${API_URL}/auth/login`, {
         method: 'POST',
-        headers: { 
-          'Content-Type': 'application/x-www-form-urlencoded', // FORMATO REQUERIDO
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
           'Accept': 'application/json'
         },
         body: formData.toString(),
       });
 
+      if (response.status === 429) {
+        const retryAfter = response.headers.get('Retry-After');
+        const seconds = retryAfter ? parseInt(retryAfter, 10) : 60;
+        showAlert('SYSTEM OVERLOAD', `Too many attempts. Wait ${seconds}s.`, 'error');
+        return;
+      }
+
       const data = await response.json();
 
       if (!response.ok) {
+        if (response.status === 403) {
+          showAlert(
+            'VERIFICATION PENDING',
+            'Check your email inbox/spam for the activation link.',
+            'warning'
+          );
+          return;
+        }
+
         let errorMsg = 'Invalid credentials';
         if (data.detail) {
-          errorMsg = typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail);
+          errorMsg = typeof data.detail === 'string' ? data.detail : 'Server error.';
         }
-        throw new Error(errorMsg);
+        showAlert('ACCESS DENIED', errorMsg, 'error');
+        return;
       }
 
+      // --- ÉXITO ---
       if (data.access_token) {
-        await SecureStore.setItemAsync('user_token', data.access_token);
-        router.replace('/(tabs)');
+        if (Platform.OS === 'web') {
+          localStorage.setItem('user_token', data.access_token);
+        } else {
+          await SecureStore.setItemAsync('user_token', data.access_token);
+        }
+
+        if (data.onboarding_completed === false) {
+          router.replace('/onboarding');
+        } else {
+          router.replace('/(tabs)');
+        }
       }
     } catch (error: any) {
-      Alert.alert('Access Failed', error.message || 'Server error');
+      showAlert('CONNECTION LOST', 'Could not reach Nexus. Check internet.', 'error');
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <KeyboardAvoidingView 
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'} 
+    <KeyboardAvoidingView
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       style={styles.container}
     >
       <StatusBar style="light" />
       <View style={styles.innerContainer}>
+        
+        {/* HEADER CON LOGO E IMAGEN */}
         <View style={styles.header}>
-          <Image source={require('../../assets/icon.png')} style={styles.logoImage} resizeMode="contain" />
+          <Image source={LOGO_IMAGE} style={styles.logoImage} resizeMode="contain" />
+          
           <Text style={styles.logoText}>WHISPER<Text style={{ color: '#10B981' }}>MIND</Text></Text>
           <Text style={styles.tagline}>Ruthless Mental Organization.</Text>
         </View>
 
         <View style={styles.form}>
-          <Text style={styles.label}>Email / Username</Text>
+          <Text style={styles.label}>Username or Email</Text>
           <TextInput
             value={email}
             onChangeText={setEmail}
-            placeholder="founder@whisper.ai"
+            placeholder="founder OR founder@whisper.com"
             placeholderTextColor="#444"
             autoCapitalize="none"
+            autoComplete="email"
             style={styles.input}
           />
 
@@ -86,10 +123,11 @@ export default function LoginScreen() {
             placeholder="••••••••"
             placeholderTextColor="#444"
             secureTextEntry
+            autoComplete="current-password"
             style={styles.input}
           />
 
-          <TouchableOpacity onPress={() => Alert.alert('Reset', 'Contact admin')} style={{ alignSelf: 'flex-end', marginBottom: 20 }}>
+          <TouchableOpacity onPress={() => showAlert('RESET PROTOCOL', 'Contact admin to reset credentials.', 'info')} style={{ alignSelf: 'flex-end', marginBottom: 20 }}>
             <Text style={{ color: '#666', fontSize: 13 }}>Forgot password?</Text>
           </TouchableOpacity>
 
@@ -112,8 +150,8 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#050505' },
   innerContainer: { flex: 1, padding: 30, justifyContent: 'center' },
-  header: { alignItems: 'center', marginBottom: 50 },
-  logoImage: { width: 80, height: 80, marginBottom: 15 },
+  header: { alignItems: 'center', marginBottom: 40 },
+  logoImage: { width: 80, height: 80, marginBottom: 20, opacity: 0.9 }, 
   logoText: { color: '#ffffff', fontSize: 36, fontWeight: '900', letterSpacing: -2 },
   tagline: { color: '#666', fontSize: 14, marginTop: 5, fontWeight: '500' },
   form: { width: '100%' },

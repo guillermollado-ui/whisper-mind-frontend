@@ -1,7 +1,7 @@
 import { Redirect } from 'expo-router';
 
-export default function EntryPoint() {
-  // Esta es la instrucción que dice: 
-  // "Si entras por la raíz, vete directo a la carpeta (auth)"
-  return <Redirect href="/(auth)" />;
+export default function Index() {
+  // Si el usuario llega aquí, es que el RootLayout ya le dejó pasar.
+  // Así que le redirigimos automáticamente al Nexus.
+  return <Redirect href="/(tabs)" />;
 }

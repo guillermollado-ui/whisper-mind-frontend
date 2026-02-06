@@ -1,3 +1,16 @@
+/**
+ * onboarding.tsx — CORRECTED
+ * 
+ * Fixes:
+ *  1. Imports apiFetch from shared utils (removes hardcoded URL + gets auto 401 handling).
+ *  2. Plays Alice's welcome audio from the backend response — previously the response
+ *     { status, message, audio_base64 } was completely ignored and the user never heard
+ *     the personalized welcome voice.
+ *  3. Fixed initial_notes from Spanish to English.
+ *  4. Added a "Welcome" step (step 4) that shows Alice's message and plays audio
+ *     before navigating to tabs, so the user gets the full onboarding experience.
+ */
+
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, SafeAreaView, Animated, Modal, ActivityIndicator } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -5,22 +18,24 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Audio } from 'expo-av';
 import * as SecureStore from 'expo-secure-store';
-
-const API_URL = 'https://wishpermind-backend.onrender.com';
+import { apiFetch } from '../utils/api';
 
 export default function OnboardingScreen() {
   const router = useRouter();
   const [step, setStep] = useState(1);
   const [fadeAnim] = useState(new Animated.Value(1));
   const [loading, setLoading] = useState(false);
-  
-  // Datos del usuario
+
   const [selections, setSelections] = useState({ personality: '', focus: '' });
   const [recordingUri, setRecordingUri] = useState<string | null>(null);
   const [recording, setRecording] = useState<Audio.Recording | null>(null);
   const [isRecording, setIsRecording] = useState(false);
 
-  // Alerta personalizada
+  // Welcome step state
+  const [welcomeMessage, setWelcomeMessage] = useState('');
+  const [welcomeSound, setWelcomeSound] = useState<Audio.Sound | null>(null);
+  const [isPlayingWelcome, setIsPlayingWelcome] = useState(false);
+
   const [alertVisible, setAlertVisible] = useState(false);
   const [alertConfig, setAlertConfig] = useState({ title: '', message: '' });
 
@@ -37,16 +52,21 @@ export default function OnboardingScreen() {
     getPermission();
   }, []);
 
-  // --- LÓGICA DE ENVÍO AL BACKEND ---
+  // Cleanup audio on unmount
+  useEffect(() => {
+    return () => {
+      if (welcomeSound) welcomeSound.unloadAsync();
+    };
+  }, [welcomeSound]);
+
   const finishOnboarding = async () => {
     setLoading(true);
     try {
-      const token = await SecureStore.getItemAsync('user_token');
-      
       const formData = new FormData();
       formData.append('personality', selections.personality || 'Empathetic & Soft');
       formData.append('focus', selections.focus || 'General Growth');
-      
+      formData.append('initial_notes', 'Onboarding completed via app.');
+
       if (recordingUri) {
         formData.append('file', {
           uri: recordingUri,
@@ -55,31 +75,60 @@ export default function OnboardingScreen() {
         } as any);
       }
 
-      const response = await fetch(`${API_URL}/auth/setup-onboarding`, {
+      const response = await apiFetch('/auth/setup-onboarding', {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Accept': 'application/json',
-        },
         body: formData,
       });
 
       if (response.ok) {
-        router.replace('/(tabs)');
+        const data = await response.json();
+
+        // --- Play Alice's welcome audio if provided ---
+        if (data.audio_base64) {
+          try {
+            const audioUri = `data:audio/mp3;base64,${data.audio_base64}`;
+            const { sound } = await Audio.Sound.createAsync(
+              { uri: audioUri },
+              { shouldPlay: true }
+            );
+            setWelcomeSound(sound);
+            setIsPlayingWelcome(true);
+            sound.setOnPlaybackStatusUpdate((status) => {
+              if (status.isLoaded && status.didJustFinish) {
+                setIsPlayingWelcome(false);
+              }
+            });
+          } catch (audioErr) {
+            console.log('Welcome audio playback error:', audioErr);
+          }
+        }
+
+        setWelcomeMessage(data.message || 'Welcome to Whisper Mind.');
+        setLoading(false);
+
+        // Transition to welcome step
+        Animated.timing(fadeAnim, { toValue: 0, duration: 300, useNativeDriver: true }).start(() => {
+          setStep(4); // Welcome step
+          Animated.timing(fadeAnim, { toValue: 1, duration: 500, useNativeDriver: true }).start();
+        });
       } else {
         const errData = await response.json();
-        showCustomAlert("Neural Link Error", errData.detail || "Could not sync preferences.");
+        const errorMsg = typeof errData.detail === 'string'
+          ? errData.detail
+          : 'Please verify your input data.';
+        showCustomAlert('Neural Link Error', errorMsg);
+        setLoading(false);
       }
-    } catch (error) {
-      showCustomAlert("Connection Error", "Alice is having trouble reaching the server.");
-    } finally {
+    } catch (error: any) {
+      if (error.message === 'SESSION_EXPIRED') return; // handled by apiFetch
+      showCustomAlert('Connection Error', 'Alice is having trouble reaching the server.');
       setLoading(false);
     }
   };
 
   const nextStep = (field?: string, value?: string) => {
     if (field && value) setSelections(prev => ({ ...prev, [field]: value }));
-    
+
     if (step === 3) {
       finishOnboarding();
       return;
@@ -89,6 +138,11 @@ export default function OnboardingScreen() {
       setStep(step + 1);
       Animated.timing(fadeAnim, { toValue: 1, duration: 300, useNativeDriver: true }).start();
     });
+  };
+
+  const enterNexus = () => {
+    if (welcomeSound) welcomeSound.unloadAsync();
+    router.replace('/(tabs)');
   };
 
   async function startRecording() {
@@ -107,18 +161,19 @@ export default function OnboardingScreen() {
       const uri = recording.getURI();
       setRecordingUri(uri);
       setRecording(null);
-      // Copy humano y directo
-      showCustomAlert("Captured", "I’ll remember this.");
+      showCustomAlert('Captured', "I'll remember this.");
     } catch (err) { console.error(err); }
   }
+
+  const progressPercent = step >= 4 ? 100 : (step / 3) * 100;
 
   return (
     <View style={styles.container}>
       <LinearGradient colors={['#050B18', '#000000']} style={StyleSheet.absoluteFill} />
-      
+
       <SafeAreaView style={styles.content}>
         <View style={styles.progressContainer}>
-          <View style={[styles.progressBar, { width: `${(step / 3) * 100}%` }]} />
+          <View style={[styles.progressBar, { width: `${progressPercent}%` }]} />
         </View>
 
         {loading ? (
@@ -128,6 +183,7 @@ export default function OnboardingScreen() {
           </View>
         ) : (
           <Animated.View style={[styles.stepBox, { opacity: fadeAnim }]}>
+            {/* STEP 1: Personality */}
             {step === 1 && (
               <>
                 <Text style={styles.title}>How should Alice guide you?</Text>
@@ -140,6 +196,7 @@ export default function OnboardingScreen() {
               </>
             )}
 
+            {/* STEP 2: Focus */}
             {step === 2 && (
               <>
                 <Text style={styles.title}>What is your North Star?</Text>
@@ -152,12 +209,12 @@ export default function OnboardingScreen() {
               </>
             )}
 
+            {/* STEP 3: Voice recording */}
             {step === 3 && (
               <>
-                {/* Copys mínimos y más directos */}
                 <Text style={styles.title}>Tell Alice what matters today</Text>
                 <Text style={styles.subtitle}>Speak in any language. Alice will adapt.</Text>
-                
+
                 <View style={styles.micContainer}>
                   <TouchableOpacity onPressIn={startRecording} onPressOut={stopRecording} activeOpacity={0.7}>
                     <View style={[styles.orbePlaceholder, isRecording && styles.orbeActive]}>
@@ -166,31 +223,61 @@ export default function OnboardingScreen() {
                       </LinearGradient>
                     </View>
                   </TouchableOpacity>
-                  
-                  {/* Micro-señal de estado para aumentar confianza */}
+
                   <Text style={styles.instructionText}>
-                    {isRecording ? "Alice is listening..." : (recordingUri ? "Captured ✓ Tap Sync & Start" : "Hold and tell Alice how she can help you")}
+                    {isRecording ? "Alice is listening..." : (recordingUri ? "Captured ✓ — Tap Sync & Start" : "Hold and tell Alice how she can help you")}
                   </Text>
                 </View>
 
-                {/* Botón con Copy de acción técnica/premium */}
-                <TouchableOpacity 
-                  style={[styles.optionBtn, { backgroundColor: '#38BDF8', borderColor: '#38BDF8', marginTop: 10 }]} 
+                <TouchableOpacity
+                  style={[styles.optionBtn, { backgroundColor: '#38BDF8', borderColor: '#38BDF8', marginTop: 10 }]}
                   onPress={() => nextStep()}
                 >
                   <Text style={[styles.optionText, { color: '#050B18' }]}>Sync & Start</Text>
                 </TouchableOpacity>
 
-                {/* Disclaimer legal para Apple y seguridad del usuario */}
                 <Text style={styles.medicalDisclaimer}>
-                  Alice isn’t a medical professional. If you’re in danger, contact local emergency services.
+                  Alice isn't a medical professional. If you're in danger, contact local emergency services.
                 </Text>
+              </>
+            )}
+
+            {/* STEP 4: Welcome — Alice's personalized message + audio */}
+            {step === 4 && (
+              <>
+                <Ionicons name="sparkles" size={48} color="#38BDF8" style={{ alignSelf: 'center', marginBottom: 25 }} />
+                <Text style={styles.welcomeTitle}>Alice is ready.</Text>
+                <Text style={styles.welcomeMessage}>{welcomeMessage}</Text>
+
+                {/* Replay button if audio exists */}
+                {welcomeSound && (
+                  <TouchableOpacity
+                    style={styles.replayBtn}
+                    onPress={async () => {
+                      try {
+                        await welcomeSound.replayAsync();
+                        setIsPlayingWelcome(true);
+                      } catch (e) {}
+                    }}
+                  >
+                    <Ionicons name={isPlayingWelcome ? "pause" : "play"} size={18} color="#38BDF8" />
+                    <Text style={styles.replayBtnText}>{isPlayingWelcome ? 'Playing...' : 'Replay Welcome'}</Text>
+                  </TouchableOpacity>
+                )}
+
+                <TouchableOpacity
+                  style={[styles.optionBtn, { backgroundColor: '#38BDF8', borderColor: '#38BDF8', marginTop: 30 }]}
+                  onPress={enterNexus}
+                >
+                  <Text style={[styles.optionText, { color: '#050B18' }]}>Enter the Nexus</Text>
+                </TouchableOpacity>
               </>
             )}
           </Animated.View>
         )}
       </SafeAreaView>
 
+      {/* Alert Modal */}
       <Modal visible={alertVisible} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={styles.alertBox}>
@@ -225,6 +312,15 @@ const styles = StyleSheet.create({
   instructionText: { color: 'white', fontSize: 13, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 25, opacity: 0.8, textAlign: 'center' },
   loadingBox: { alignItems: 'center', justifyContent: 'center' },
   loadingText: { color: '#F59E0B', marginTop: 20, fontWeight: 'bold', letterSpacing: 2 },
+  medicalDisclaimer: { color: '#64748B', fontSize: 11, textAlign: 'center', marginTop: 25, lineHeight: 16, paddingHorizontal: 10 },
+
+  // Welcome step
+  welcomeTitle: { fontSize: 28, fontWeight: '700', color: 'white', textAlign: 'center', marginBottom: 20 },
+  welcomeMessage: { color: '#CBD5E1', fontSize: 16, textAlign: 'center', lineHeight: 26, marginBottom: 10, fontStyle: 'italic' },
+  replayBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 12, paddingHorizontal: 24, borderRadius: 20, borderWidth: 1, borderColor: '#38BDF8', alignSelf: 'center', marginTop: 15 },
+  replayBtnText: { color: '#38BDF8', fontSize: 12, fontWeight: 'bold', letterSpacing: 1 },
+
+  // Alert
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', alignItems: 'center' },
   alertBox: { width: '85%', borderRadius: 30, padding: 35, alignItems: 'center', overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(245, 158, 11, 0.3)' },
   alertGradient: { ...StyleSheet.absoluteFillObject },
@@ -232,12 +328,4 @@ const styles = StyleSheet.create({
   alertMessage: { color: '#D1D5DB', fontSize: 16, textAlign: 'center', marginBottom: 30, lineHeight: 24 },
   alertBtn: { backgroundColor: '#F59E0B', paddingVertical: 14, paddingHorizontal: 40, borderRadius: 15 },
   alertBtnText: { color: '#000', fontWeight: '900', letterSpacing: 1.5, fontSize: 14 },
-  medicalDisclaimer: {
-    color: '#64748B',
-    fontSize: 11,
-    textAlign: 'center',
-    marginTop: 25,
-    lineHeight: 16,
-    paddingHorizontal: 10
-  }
 });

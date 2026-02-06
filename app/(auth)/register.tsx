@@ -1,24 +1,51 @@
+/**
+ * (auth)/register.tsx — WHISPERIZED
+ * * Fixes:
+ * 1. Integrated AlertContext (Black/Neon Alerts).
+ * 2. Removed legacy Modal code.
+ * 3. Auto-redirect to login on success.
+ */
+
 import React, { useState } from 'react';
-import { 
-    View, 
-    Text, 
-    TextInput, 
-    TouchableOpacity, 
-    StyleSheet, 
+import {
+    View,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    StyleSheet,
     ActivityIndicator,
     KeyboardAvoidingView,
-    Platform,
-    Modal
+    Platform
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import * as SecureStore from 'expo-secure-store';
+import { API_URL } from '../../utils/api';
+// ✅ IMPORTAMOS EL SISTEMA DE ALERTAS
+import { useAlert } from '../../src/context/AlertContext';
 
-const API_URL = 'https://wishpermind-backend.onrender.com';
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/**
+ * Validate password against the corrected backend's rules:
+ * - At least 8 characters
+ * - At least one uppercase letter
+ * - At least one lowercase letter
+ * - At least one digit
+ */
+const validatePassword = (password: string): string | null => {
+    if (password.length < 8) return 'Password must be at least 8 characters.';
+    if (!/[A-Z]/.test(password)) return 'Password must contain an uppercase letter.';
+    if (!/[a-z]/.test(password)) return 'Password must contain a lowercase letter.';
+    if (!/[0-9]/.test(password)) return 'Password must contain a number.';
+    return null; // valid
+};
 
 export default function RegisterScreen() {
     const router = useRouter();
+    // ✅ HOOK DE ALERTAS
+    const { showAlert } = useAlert();
+
     const [username, setUsername] = useState('');
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
@@ -26,26 +53,30 @@ export default function RegisterScreen() {
     const [loading, setLoading] = useState(false);
     const [showPassword, setShowPassword] = useState(false);
 
-    // --- ESTADO PARA ALERTA PERSONALIZADA ---
-    const [alertVisible, setAlertVisible] = useState(false);
-    const [alertConfig, setAlertConfig] = useState({ title: '', message: '', type: 'error' });
-
-    const showCustomAlert = (title: string, message: string, type: 'error' | 'success' = 'error') => {
-        setAlertConfig({ title, message, type });
-        setAlertVisible(true);
-    };
-
     const handleRegister = async () => {
+        // --- CLIENT-SIDE VALIDATION ---
         if (!disclaimerAccepted) {
-            showCustomAlert('Access Denied', 'You must accept the Medical Disclaimer to proceed.');
+            showAlert('ACCESS DENIED', 'You must accept the Medical Disclaimer to proceed.', 'warning');
             return;
         }
 
-        if (!username || !email || !password) {
-            showCustomAlert('Missing Data', 'All neural fields are required for identification.');
+        if (!username.trim() || !email.trim() || !password) {
+            showAlert('MISSING DATA', 'All fields are required.', 'warning');
             return;
         }
 
+        if (!EMAIL_REGEX.test(email.trim())) {
+            showAlert('INVALID SYNTAX', 'Please enter a valid email address.', 'warning');
+            return;
+        }
+
+        const passwordError = validatePassword(password);
+        if (passwordError) {
+            showAlert('WEAK SECURITY', passwordError, 'warning');
+            return;
+        }
+
+        // --- NETWORK ---
         setLoading(true);
         try {
             const response = await fetch(`${API_URL}/auth/register`, {
@@ -55,50 +86,45 @@ export default function RegisterScreen() {
                     username: username.toLowerCase().trim(),
                     email: email.toLowerCase().trim(),
                     password: password,
-                    disclaimer_accepted: true 
+                    disclaimer_accepted: true
                 }),
             });
+
+            // Rate limited
+            if (response.status === 429) {
+                const retryAfter = response.headers.get('Retry-After');
+                const seconds = retryAfter ? parseInt(retryAfter, 10) : 3600;
+                showAlert(
+                    'SYSTEM OVERLOAD',
+                    `Registration limit reached. Wait ${Math.ceil(seconds / 60)} min.`,
+                    'error'
+                );
+                return;
+            }
 
             const data = await response.json();
 
             if (!response.ok) {
-                showCustomAlert('Protocol Failed', data.detail || 'Identity could not be established.');
-                setLoading(false);
+                showAlert('PROTOCOL FAILED', data.detail || 'Identity could not be established.', 'error');
                 return;
             }
 
-            // AUTO-LOGIN
-            const formData = new URLSearchParams();
-            formData.append('username', username.toLowerCase().trim());
-            formData.append('password', password);
-
-            const loginRes = await fetch(`${API_URL}/auth/login`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                body: formData.toString(),
-            });
-
-            const loginData = await loginRes.json();
-
-            if (loginRes.ok && loginData.access_token) {
-                await SecureStore.setItemAsync('user_token', loginData.access_token);
-                showCustomAlert('Protocol Established', 'Identity verified. Let Alice meet you.', 'success');
-            } else {
-                showCustomAlert('Manual Access Required', 'Account created, but neural link failed. Please login manually.');
-            }
+            // Success
+            showAlert(
+                'IDENTITY ESTABLISHED',
+                "Verification link sent. Check your inbox to activate protocol.",
+                'success'
+            );
+            
+            // Auto-redirect to login after a moment so user reads the message
+            setTimeout(() => {
+                router.replace('/login');
+            }, 2500);
 
         } catch (error) {
-            showCustomAlert('Connection Error', 'Neural link failed. Check your connection.');
+            showAlert('CONNECTION ERROR', 'Neural link failed. Check your connection.', 'error');
         } finally {
             setLoading(false);
-        }
-    };
-
-    const closeAlert = () => {
-        setAlertVisible(false);
-        if (alertConfig.type === 'success') {
-            // AQUÍ ES DONDE IREMOS AL ONBOARDING
-            router.replace('/(auth)/onboarding');
         }
     };
 
@@ -106,7 +132,7 @@ export default function RegisterScreen() {
         <View style={styles.container}>
             <LinearGradient colors={['#000000', '#1a1a1a']} style={StyleSheet.absoluteFill} />
             <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={styles.content}>
-                
+
                 <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
                     <Ionicons name="arrow-back" size={24} color="#10B981" />
                 </TouchableOpacity>
@@ -135,36 +161,21 @@ export default function RegisterScreen() {
                         </TouchableOpacity>
                     </View>
 
+                    {/* Password hint */}
+                    <Text style={styles.passwordHint}>
+                        8+ characters, uppercase, lowercase, and a number
+                    </Text>
+
                     <TouchableOpacity style={styles.disclaimerContainer} onPress={() => setDisclaimerAccepted(!disclaimerAccepted)}>
                         <Ionicons name={disclaimerAccepted ? "checkbox" : "square-outline"} size={24} color={disclaimerAccepted ? "#10B981" : "#64748B"} style={{marginRight: 10}} />
                         <Text style={styles.disclaimerText}>I acknowledge that Whisper Mind is an AI tool, <Text style={{color: '#ef4444', fontWeight: 'bold'}}>NOT a doctor</Text>.</Text>
                     </TouchableOpacity>
 
-                    <TouchableOpacity style={[styles.registerBtn, !disclaimerAccepted && {opacity: 0.5}]} onPress={handleRegister} disabled={loading}>
+                    <TouchableOpacity style={[styles.registerBtn, !disclaimerAccepted && {opacity: 0.5}]} onPress={handleRegister} disabled={loading || !disclaimerAccepted}>
                         {loading ? <ActivityIndicator color="#000" /> : <Text style={styles.registerBtnText}>ESTABLISH PROTOCOL</Text>}
                     </TouchableOpacity>
                 </View>
             </KeyboardAvoidingView>
-
-            {/* --- MODAL DE ALERTA COACH ORANGE --- */}
-            <Modal visible={alertVisible} transparent animationType="fade">
-                <View style={styles.modalOverlay}>
-                    <View style={styles.alertBox}>
-                        <LinearGradient colors={['#1a1a1a', '#050505']} style={styles.alertGradient} />
-                        <Ionicons 
-                            name={alertConfig.type === 'success' ? "flash" : "alert-circle"} 
-                            size={50} 
-                            color="#F59E0B" 
-                            style={{marginBottom: 15}} 
-                        />
-                        <Text style={styles.alertTitle}>{alertConfig.title}</Text>
-                        <Text style={styles.alertMessage}>{alertConfig.message}</Text>
-                        <TouchableOpacity style={styles.alertBtn} onPress={closeAlert}>
-                            <Text style={styles.alertBtnText}>ACKNOWLEDGE</Text>
-                        </TouchableOpacity>
-                    </View>
-                </View>
-            </Modal>
         </View>
     );
 }
@@ -180,17 +191,9 @@ const styles = StyleSheet.create({
     inputWrapper: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#1e293b', borderRadius: 12, borderWidth: 1, borderColor: '#334155', marginBottom: 15, paddingHorizontal: 15, height: 55 },
     inputIcon: { marginRight: 10 },
     input: { flex: 1, color: '#fff', fontSize: 16 },
+    passwordHint: { color: '#64748B', fontSize: 11, marginBottom: 18, marginTop: -8, paddingLeft: 5 },
     disclaimerContainer: { flexDirection: 'row', alignItems: 'center', marginBottom: 20, paddingHorizontal: 5 },
     disclaimerText: { color: '#94A3B8', fontSize: 12, flex: 1 },
     registerBtn: { backgroundColor: '#10B981', borderRadius: 12, height: 55, justifyContent: 'center', alignItems: 'center', marginBottom: 15 },
     registerBtnText: { color: '#000', fontSize: 16, fontWeight: 'bold', letterSpacing: 1 },
-    
-    // --- ESTILOS MODAL NARANJA ---
-    modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', alignItems: 'center' },
-    alertBox: { width: '85%', borderRadius: 30, padding: 35, alignItems: 'center', overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(245, 158, 11, 0.3)' },
-    alertGradient: { ...StyleSheet.absoluteFillObject },
-    alertTitle: { color: 'white', fontSize: 22, fontWeight: '900', marginBottom: 10, textAlign: 'center', letterSpacing: 1 },
-    alertMessage: { color: '#D1D5DB', fontSize: 16, textAlign: 'center', marginBottom: 30, lineHeight: 24 },
-    alertBtn: { backgroundColor: '#F59E0B', paddingVertical: 14, paddingHorizontal: 40, borderRadius: 15 },
-    alertBtnText: { color: '#000', fontWeight: '900', letterSpacing: 1.5, fontSize: 14 }
 });

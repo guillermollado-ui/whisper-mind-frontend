@@ -1,42 +1,51 @@
-import React, { useState, useCallback, useEffect } from 'react';
+/**
+ * (tabs)/vault.tsx — THE SPECTACULAR GALLERY UPGRADE
+ * * Design: Immersive Cards, Glassmorphism, Cyber-Typography.
+ */
+
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   Image,
-  ActivityIndicator,
   RefreshControl,
-  Platform,
   TouchableOpacity,
-  Alert,
   FlatList,
-  Share
+  Share,
+  Dimensions,
+  StatusBar
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from 'expo-router';
-import * as SecureStore from 'expo-secure-store';
-// 🆕 Imports corregidos para las versiones más recientes de Expo
 import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system/legacy';
+import { API_URL, apiFetch } from '../../utils/api';
+import { useAlert } from '../../src/context/AlertContext';
 
-const API_URL = 'https://wishpermind-backend.onrender.com';
+const { width } = Dimensions.get('window');
 
-// --- COLORES DE MODOS ---
-const MODE_COLORS = {
-  default: '#38BDF8', calm: '#10B981', win: '#F59E0B', sleep: '#8B5CF6', 
-  dream: '#6366F1', morning: '#F472B6', flash: '#EF4444', journal: '#0EA5E9'
+// --- THEME & COLORS ---
+const THEME = {
+  bg: '#000000',
+  cardBg: '#09090b',
+  border: 'rgba(255, 255, 255, 0.08)',
+  textMain: '#F8FAFC',
+  textSub: '#94A3B8',
+  accentJournal: '#38BDF8',
+  accentDream: '#818CF8', // Indigo suave para sueños
+  accentLog: '#64748B'
 };
 
-// --- ARQUETIPOS ---
 const ARCHETYPES = [
-  { limit: 0, title: "Echo Wanderer", icon: "footsteps-outline", color: "#94A3B8", desc: "Beginning the journey inward." },
-  { limit: 3, title: "Mind Gardner", icon: "leaf-outline", color: "#10B981", desc: "Cultivating first insights." },
-  { limit: 10, title: "Lucid Navigator", icon: "compass-outline", color: "#38BDF8", desc: "Mapping the subconscious terrain." },
-  { limit: 25, title: "Void Architect", icon: "construct-outline", color: "#F59E0B", desc: "Building new mental structures." },
+  { limit: 0, title: "ECHO WANDERER", icon: "footsteps-outline", color: "#94A3B8", desc: "Beginning the journey inward." },
+  { limit: 3, title: "MIND GARDNER", icon: "leaf-outline", color: "#10B981", desc: "Cultivating first insights." },
+  { limit: 10, title: "LUCID NAVIGATOR", icon: "compass-outline", color: "#38BDF8", desc: "Mapping the subconscious terrain." },
+  { limit: 25, title: "VOID ARCHITECT", icon: "construct-outline", color: "#F59E0B", desc: "Building new mental structures." },
 ];
 
-const determineArchetype = (count) => {
+const determineArchetype = (count: number) => {
   let arch = ARCHETYPES[0];
   for (let a of ARCHETYPES) {
     if (count >= a.limit) arch = a;
@@ -44,20 +53,33 @@ const determineArchetype = (count) => {
   return arch;
 };
 
-// --- COMPONENTE TEXTO EXPANDIBLE ---
-const ExpandableText = ({ text, color }) => {
+// --- IMAGE UTILS ---
+const getImageUrl = (url: string | null | undefined): string | null => {
+  if (!url || typeof url !== 'string') return null;
+  if (url.startsWith('data:image')) return url.replace(/\s/g, '');
+  if (url.startsWith('http')) return url;
+  const cleanPath = url.replace(/^\/+/, '');
+  return `${API_URL}/${cleanPath}`;
+};
+
+// --- EXPANDABLE TEXT COMPONENT ---
+const ExpandableText = ({ text, color, isChat = false }: { text: string; color: string, isChat?: boolean }) => {
   const [isExpanded, setIsExpanded] = useState(false);
   if (!text) return null;
-  const cleanText = text.replace(/^"|"$/g, ''); 
-  if (cleanText.length < 80) return <Text style={styles.summaryText}>{cleanText}</Text>;
+  const cleanText = text.replace(/^"|"$/g, '');
+  
+  // Limite visual
+  const limit = isChat ? 120 : 150; 
+  if (cleanText.length < limit) return <Text style={[styles.summaryText, isChat && styles.chatText]}>{cleanText}</Text>;
+
   return (
     <View>
-      <Text style={styles.summaryText} numberOfLines={isExpanded ? undefined : 3}>
+      <Text style={[styles.summaryText, isChat && styles.chatText]} numberOfLines={isExpanded ? undefined : 3}>
         {cleanText}
       </Text>
-      <TouchableOpacity onPress={() => setIsExpanded(!isExpanded)} style={{ marginTop: 5, marginBottom: 10 }}>
-        <Text style={{ color: color, fontSize: 11, fontWeight: 'bold', letterSpacing: 1 }}>
-          {isExpanded ? 'READ LESS' : 'READ MORE'}
+      <TouchableOpacity onPress={() => setIsExpanded(!isExpanded)} style={{ marginTop: 8, alignSelf: 'flex-start' }}>
+        <Text style={{ color: color, fontSize: 10, fontWeight: '900', letterSpacing: 1.5, textTransform: 'uppercase' }}>
+          {isExpanded ? 'COLLAPSE' : 'READ FULL ENTRY'}
         </Text>
       </TouchableOpacity>
     </View>
@@ -65,306 +87,323 @@ const ExpandableText = ({ text, color }) => {
 };
 
 export default function VaultScreen() {
-  const [activeTab, setActiveTab] = useState('journal'); 
-  const [vaultItems, setVaultItems] = useState([]); 
-  const [chatItems, setChatItems] = useState([]);   
+  const { showAlert } = useAlert();
+
+  const [activeTab, setActiveTab] = useState('journal');
+  const [vaultItems, setVaultItems] = useState<any[]>([]);
+  const [chatItems, setChatItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [displayLimit, setDisplayLimit] = useState(10);
-
-  useEffect(() => {
-    setDisplayLimit(10);
-  }, [activeTab]);
   
+  const [displayLimitState, setDisplayLimitState] = useState<Record<string, number>>({
+    journal: 10, dream: 10, chats: 10
+  });
+
+  const handleTabChange = (tab: string) => {
+    setActiveTab(tab);
+    setDisplayLimitState(prev => ({ ...prev, [tab]: 10 }));
+  };
+
   const totalMemories = vaultItems.length + chatItems.length;
   const currentArchetype = determineArchetype(totalMemories);
 
-  const getAuthToken = async () => {
-    if (Platform.OS === 'web') return localStorage.getItem('user_token');
-    return await SecureStore.getItemAsync('user_token');
-  };
-
-  // 🆕 FUNCIÓN PARA FORMATEAR LA URL DE LA IMAGEN
-  const getImageUrl = (url) => {
-    if (!url) return null;
-    if (url.startsWith('data:image')) return url; // Base64 antiguo
-    if (url.startsWith('/images/')) return `${API_URL}${url}`; // Nuevo GridFS
-    return url;
-  };
-
   const fetchAllData = async () => {
     try {
-      const token = await getAuthToken();
-      if (!token) { setLoading(false); return; }
-
-      const resVault = await fetch(`${API_URL}/vault`, { headers: { 'Authorization': `Bearer ${token}` } });
+      const resVault = await apiFetch('/vault');
       const dataVault = await resVault.json();
       if (resVault.ok) setVaultItems(dataVault);
 
-      const resChat = await fetch(`${API_URL}/chat/history`, { headers: { 'Authorization': `Bearer ${token}` } });
+      const resChat = await apiFetch('/chat/history');
       const dataChat = await resChat.json();
       if (resChat.ok) {
-          const aiEntries = dataChat.filter(msg => msg.role === 'assistant');
-          setChatItems(aiEntries);
+        const aiEntries = dataChat.filter((msg: any) => msg.role === 'assistant');
+        setChatItems(aiEntries);
       }
-    } catch (e) { console.error("Error fetching data:", e); } finally { setLoading(false); setRefreshing(false); }
+    } catch (e: any) {
+      if (e.message === 'SESSION_EXPIRED') return;
+      console.error("Vault fetch error", e);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
   };
 
   useFocusEffect(useCallback(() => { fetchAllData(); }, []));
   const onRefresh = () => { setRefreshing(true); fetchAllData(); };
 
-  const getAllDataForTab = () => {
-      if (activeTab === 'chats') return chatItems;
-      return vaultItems.filter(item => {
-          const itemMode = item.mode || (item.summary ? 'journal' : 'dream');
-          return itemMode === activeTab;
-      });
-  };
+  const fullList = activeTab === 'chats' ? chatItems : vaultItems.filter(item => {
+    const itemMode = item.mode || (item.summary ? 'journal' : 'dream');
+    return itemMode === activeTab;
+  });
+  
+  const currentLimit = displayLimitState[activeTab] || 10;
+  const visibleList = fullList.slice(0, currentLimit);
 
-  const fullList = getAllDataForTab();
-  const visibleList = fullList.slice(0, displayLimit); 
-  const showLoadMore = fullList.length > displayLimit; 
-
-  const handleLoadMore = () => {
-      setDisplayLimit(prev => prev + 10);
-  };
-
-  // 🆕 LÓGICA DE COMPARTIR ACTUALIZADA A EXPO LEGACY
-  const handleShareImage = async (url) => {
+  // --- ACTIONS ---
+  const handleShareImage = async (imgSource: string | null | undefined) => {
     try {
-      const finalUrl = getImageUrl(url);
-      if (!finalUrl) {
-          Alert.alert("Error", "No image found to share.");
-          return;
+      const finalUrl = getImageUrl(imgSource);
+      if (!finalUrl) { 
+        showAlert("IMAGE ERROR", "No visual data found.", "error"); 
+        return; 
       }
-
       const filename = FileSystem.cacheDirectory + "whisper_memory.png";
-
       if (finalUrl.startsWith('data:image')) {
         const base64Data = finalUrl.split('base64,')[1];
-        await FileSystem.writeAsStringAsync(filename, base64Data, {
-          encoding: FileSystem.EncodingType.Base64,
-        });
+        await FileSystem.writeAsStringAsync(filename, base64Data, { encoding: FileSystem.EncodingType.Base64 });
         await Sharing.shareAsync(filename);
       } else {
         const download = await FileSystem.downloadAsync(finalUrl, filename);
-        if (download.status === 200) {
-          await Sharing.shareAsync(download.uri, {
-            mimeType: 'image/png',
-            dialogTitle: 'Share your Whisper Mind memory',
-            UTI: 'public.png'
-          });
-        }
+        if (download.status === 200) await Sharing.shareAsync(download.uri, { mimeType: 'image/png', UTI: 'public.png' });
       }
-    } catch (error) {
-      console.error("Error sharing image:", error);
-      Alert.alert("Export Error", "Alice couldn't prepare the image. Please try again.");
+    } catch (error) { 
+        showAlert("EXPORT FAILED", "Could not process image.", "error"); 
     }
   };
 
-  const handleShareText = async (text, title) => { try { await Share.share({ message: `${title}\n\n${text}` }); } catch (error) { Alert.alert("Error sharing"); } };
+  const handleShareText = async (text: string, title: string) => {
+    try { 
+        await Share.share({ message: `${title}\n\n${text}` }); 
+    } catch (error) {
+        showAlert("SHARE ERROR", "Text export interrupted.", "error");
+    }
+  };
 
-  const renderVisualCard = ({ item }) => {
+  // --- RENDERERS ---
+
+  const renderVisualCard = ({ item }: { item: any }) => {
     const isJournal = activeTab === 'journal';
-    const accentColor = isJournal ? '#38BDF8' : '#6366F1'; 
+    const accentColor = isJournal ? THEME.accentJournal : THEME.accentDream;
+    
     const dateObj = new Date(item.date);
     const dayNum = dateObj.getDate();
     const monthStr = dateObj.toLocaleDateString(undefined, { month: 'short' }).toUpperCase();
-    const weekday = dateObj.toLocaleDateString(undefined, { weekday: 'short' }).toUpperCase();
     const timeStr = dateObj.toLocaleTimeString([], { hour: '2-digit', minute:'2-digit' });
 
+    const rawImageSource = item.image_url || item.image || item.dream_image || item.generated_image || item.url;
+    const imageUrl = getImageUrl(rawImageSource);
+
     return (
-        <View style={[styles.cardContainer, { borderLeftColor: accentColor }]}>
-            <View style={styles.cardHeader}>
-                <View style={{flexDirection: 'row', alignItems: 'center', gap: 8}}>
-                    <View style={[styles.dot, { backgroundColor: accentColor }]} />
-                    <Text style={[styles.cardTag, { color: accentColor }]}>{activeTab.toUpperCase()}</Text>
-                </View>
-                <View style={styles.dateBadge}>
-                    <Text style={styles.dateDay}>{dayNum}</Text>
-                    <View style={{alignItems: 'flex-start'}}>
-                        <Text style={styles.dateMonth}>{monthStr}</Text>
-                        <Text style={styles.dateTime}>{weekday} • {timeStr}</Text>
-                    </View>
-                </View>
+      <View style={styles.cardContainer}>
+        {/* HERO IMAGE SECTION */}
+        <View style={styles.imageSection}>
+          {imageUrl ? (
+            <Image
+              source={{ uri: imageUrl }}
+              style={StyleSheet.absoluteFill}
+              resizeMode="cover"
+            />
+          ) : (
+            <View style={[StyleSheet.absoluteFill, styles.fallbackImage]}>
+               <Ionicons name="aperture-outline" size={40} color="#1e293b" />
             </View>
+          )}
+          
+          {/* Top Gradient for text readability if needed */}
+          <LinearGradient colors={['rgba(0,0,0,0.6)', 'transparent']} style={{position:'absolute', top:0, width:'100%', height: 80}} />
 
-            <View style={styles.textContainer}>
-                <ExpandableText text={item.summary || item.prompt} color={accentColor} />
-                {isJournal && item.action && (
-                    <View style={styles.actionBox}>
-                        <Ionicons name="bulb-outline" size={14} color="#F59E0B" />
-                        <Text style={styles.actionText}>{item.action}</Text>
-                    </View>
-                )}
-            </View>
-
-            <View style={styles.imageWrapper}>
-                <Image source={{ uri: getImageUrl(item.image_url || item.url) }} style={styles.cardImage} />
-                <View style={styles.imageOverlay}>
-                    <Ionicons name="color-palette" size={12} color="white" />
-                    <Text style={styles.imageTag}>{isJournal ? "EMOTIONAL ART" : "DREAM ART"}</Text>
+          {/* Floating Badges */}
+          <View style={styles.floatingHeader}>
+             <View style={styles.dateBadge}>
+                <Text style={styles.dateDay}>{dayNum}</Text>
+                <View>
+                    <Text style={styles.dateMonth}>{monthStr}</Text>
+                    <Text style={styles.dateTime}>{timeStr}</Text>
                 </View>
-            </View>
-
-            <View style={styles.cardFooter}>
-                <TouchableOpacity style={styles.footerBtn} onPress={() => handleShareText(item.summary || item.prompt, "WhisperMind Log")}>
-                    <Ionicons name="share-social-outline" size={16} color="#94A3B8" />
-                    <Text style={styles.footerBtnText}>EXPORT</Text>
+             </View>
+             {imageUrl && (
+                <TouchableOpacity style={styles.iconButton} onPress={() => handleShareImage(rawImageSource)}>
+                    <Ionicons name="download-outline" size={18} color="white" />
                 </TouchableOpacity>
-                <TouchableOpacity style={styles.footerBtn} onPress={() => handleShareImage(item.image_url || item.url)}>
-                    <Ionicons name="download-outline" size={16} color="#94A3B8" />
-                    <Text style={styles.footerBtnText}>SAVE ART</Text>
-                </TouchableOpacity>
-            </View>
+             )}
+          </View>
+
+          {/* Bottom Gradient blending into body */}
+          <LinearGradient colors={['transparent', '#09090b']} style={{position:'absolute', bottom:0, width:'100%', height: 100}} />
+          
+          {/* Tag on Image */}
+          <View style={[styles.tagBadge, { backgroundColor: accentColor }]}>
+             <Ionicons name={isJournal ? "book" : "planet"} size={10} color="black" />
+             <Text style={styles.tagText}>{activeTab.toUpperCase()}</Text>
+          </View>
         </View>
+
+        {/* CONTENT BODY */}
+        <View style={styles.cardBody}>
+          {isJournal && item.action && (
+            <View style={styles.actionBlock}>
+              <Ionicons name="sparkles" size={14} color={accentColor} />
+              <Text style={[styles.actionText, { color: accentColor }]}>{item.action.toUpperCase()}</Text>
+            </View>
+          )}
+          
+          <ExpandableText text={item.summary || item.prompt || ''} color={accentColor} />
+          
+          <View style={styles.cardFooter}>
+             <TouchableOpacity style={styles.shareTextBtn} onPress={() => handleShareText(item.summary || item.prompt || '', "WhisperMind Memory")}>
+                <Text style={styles.shareTextLabel}>SHARE TEXT</Text>
+                <Ionicons name="share-outline" size={14} color={THEME.textSub} />
+             </TouchableOpacity>
+          </View>
+        </View>
+      </View>
     );
   };
 
-  const renderChatCard = ({ item }) => {
+  const renderChatCard = ({ item }: { item: any }) => {
     const mode = item.mode || 'default';
-    const color = MODE_COLORS[mode] || MODE_COLORS.default;
     const dateObj = new Date(item.timestamp);
-    const dateStr = dateObj.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+    const dateStr = dateObj.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
     const timeStr = dateObj.toLocaleTimeString([], { hour: '2-digit', minute:'2-digit' });
 
     return (
-        <View style={[styles.chatCard, { borderLeftColor: color }]}>
-            <View style={styles.cardHeader}>
-                <View style={styles.badgeContainer}>
-                    <Ionicons name="chatbubble-ellipses-outline" size={14} color={color} />
-                    <Text style={[styles.modeLabel, { color: color }]}>{mode.toUpperCase()}</Text>
-                </View>
-                <Text style={styles.dateTextSimple}>{dateStr} • {timeStr}</Text>
-            </View>
-            <ExpandableText text={item.content} color={color} />
-            <View style={styles.actionsBarChat}>
-                <TouchableOpacity style={styles.actionBtn} onPress={() => handleShareText(item.content, `Log: ${dateStr}`)}>
-                    <Ionicons name="share-outline" size={16} color="#64748B" />
-                </TouchableOpacity>
-            </View>
+      <View style={styles.chatCard}>
+        <View style={styles.chatHeader}>
+           <View style={{flexDirection:'row', alignItems:'center', gap:8}}>
+              <View style={[styles.dot, {backgroundColor: THEME.accentLog}]} />
+              <Text style={styles.chatMode}>{mode.toUpperCase()}</Text>
+           </View>
+           <Text style={styles.chatDate}>{dateStr} • {timeStr}</Text>
         </View>
+        <ExpandableText text={item.content || ''} color={THEME.accentLog} isChat={true} />
+      </View>
     );
   };
 
   return (
     <View style={styles.container}>
-      <LinearGradient colors={['#0f172a', '#000000']} style={StyleSheet.absoluteFill} />
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>THE VAULT</Text>
-        <Text style={styles.headerSubtitle}>MEMORY ARCHIVE</Text>
+      <StatusBar barStyle="light-content" />
+      <LinearGradient colors={['#000000', '#09090b']} style={StyleSheet.absoluteFill} />
+
+      <View style={styles.headerContainer}>
+        <View>
+          <Text style={styles.headerTitle}>VAULT</Text>
+          <Text style={styles.headerSubtitle}>PERMANENT MEMORY</Text>
+        </View>
+        <TouchableOpacity onPress={onRefresh} style={styles.refreshButton}>
+           <Ionicons name="sync" size={18} color={THEME.textSub} />
+        </TouchableOpacity>
       </View>
 
       <FlatList
         data={visibleList}
         renderItem={activeTab === 'chats' ? renderChatCard : renderVisualCard}
-        keyExtractor={(item, index) => index.toString()}
-        contentContainerStyle={styles.listContent}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#fff" />}
+        keyExtractor={(item, index) => item._id?.toString() || index.toString()}
+        contentContainerStyle={styles.listContainer}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={THEME.accentJournal} />}
         ListHeaderComponent={
-            <>
-                <LinearGradient colors={['rgba(30, 41, 59, 0.8)', 'rgba(15, 23, 42, 0.8)']} style={styles.archetypeCard}>
-                    <View style={styles.archHeader}>
-                        <Ionicons name={currentArchetype.icon} size={32} color={currentArchetype.color} />
-                        <View style={{marginLeft: 15}}>
-                            <Text style={[styles.archTitle, { color: currentArchetype.color }]}>{currentArchetype.title.toUpperCase()}</Text>
-                            <Text style={styles.archLevel}>Level {Math.floor(totalMemories / 5) + 1}</Text>
-                        </View>
-                    </View>
-                    <Text style={styles.archDesc}>{currentArchetype.desc}</Text>
-                    <View style={styles.progressBar}>
-                        <View style={[styles.progressFill, { width: `${Math.min((totalMemories % 10) * 10, 100)}%`, backgroundColor: currentArchetype.color }]} />
-                    </View>
-                    <Text style={styles.statsText}>{totalMemories} Memories Stored</Text>
-                </LinearGradient>
+          <>
+            {/* ARCHETYPE WIDGET */}
+            <LinearGradient
+                colors={['#111827', '#000000']}
+                start={{x:0, y:0}} end={{x:1, y:1}}
+                style={[styles.archetypeWidget, { borderColor: currentArchetype.color + '30' }]}
+            >
+               <View style={styles.archRow}>
+                  <View style={[styles.archIcon, { backgroundColor: currentArchetype.color + '15' }]}>
+                     <Ionicons name={currentArchetype.icon as any} size={22} color={currentArchetype.color} />
+                  </View>
+                  <View style={{flex:1}}>
+                     <Text style={[styles.archTitle, { color: currentArchetype.color }]}>{currentArchetype.title}</Text>
+                     <Text style={styles.archSub}>{currentArchetype.desc}</Text>
+                  </View>
+                  <Text style={styles.countText}>{totalMemories}</Text>
+               </View>
+               <View style={styles.progressTrack}>
+                  <View style={[styles.progressFill, { width: `${Math.min((totalMemories % 10) * 10, 100)}%`, backgroundColor: currentArchetype.color }]} />
+               </View>
+            </LinearGradient>
 
-                <View style={styles.tabsContainer}>
-                    <TouchableOpacity style={[styles.tab, activeTab === 'journal' && styles.activeTab]} onPress={() => setActiveTab('journal')}>
-                        <Ionicons name="book-outline" size={16} color={activeTab === 'journal' ? '#38BDF8' : '#64748B'} />
-                        <Text style={[styles.tabText, activeTab === 'journal' && styles.activeTabText]}>JOURNAL</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={[styles.tab, activeTab === 'dream' && styles.activeTabDream]} onPress={() => setActiveTab('dream')}>
-                        <Ionicons name="moon-outline" size={16} color={activeTab === 'dream' ? '#6366F1' : '#64748B'} />
-                        <Text style={[styles.tabText, activeTab === 'dream' && styles.activeTabTextDream]}>DREAMS</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={[styles.tab, activeTab === 'chats' && styles.activeTabChat]} onPress={() => setActiveTab('chats')}>
-                        <Ionicons name="chatbubbles-outline" size={16} color={activeTab === 'chats' ? '#94A3B8' : '#64748B'} />
-                        <Text style={[styles.tabText, activeTab === 'chats' && styles.activeTabTextChat]}>LOGS</Text>
-                    </TouchableOpacity>
-                </View>
-            </>
+            {/* TAB SELECTOR */}
+            <View style={styles.tabsWrapper}>
+               <TouchableOpacity onPress={() => handleTabChange('journal')} style={[styles.tabBtn, activeTab === 'journal' && styles.tabActive]}>
+                  <Text style={[styles.tabLabel, activeTab === 'journal' && {color: THEME.accentJournal}]}>JOURNAL</Text>
+               </TouchableOpacity>
+               <TouchableOpacity onPress={() => handleTabChange('dream')} style={[styles.tabBtn, activeTab === 'dream' && styles.tabActive]}>
+                  <Text style={[styles.tabLabel, activeTab === 'dream' && {color: THEME.accentDream}]}>DREAMS</Text>
+               </TouchableOpacity>
+               <TouchableOpacity onPress={() => handleTabChange('chats')} style={[styles.tabBtn, activeTab === 'chats' && styles.tabActive]}>
+                  <Text style={[styles.tabLabel, activeTab === 'chats' && {color: THEME.textMain}]}>LOGS</Text>
+               </TouchableOpacity>
+            </View>
+          </>
         }
-        ListEmptyComponent={
-            !loading && (
-                <View style={styles.emptyState}>
-                    <Ionicons name="file-tray-outline" size={48} color="#334155" />
-                    <Text style={styles.emptyText}>No {activeTab} found.</Text>
-                </View>
-            )
-        }
-        ListFooterComponent={
-             showLoadMore && (
-                 <TouchableOpacity style={styles.loadMoreBtn} onPress={handleLoadMore}>
-                     <Text style={styles.loadMoreText}>LOAD OLDER MEMORIES</Text>
-                     <Ionicons name="chevron-down" size={16} color="#94A3B8" />
-                 </TouchableOpacity>
-             )
-        }
+        ListFooterComponent={currentLimit < fullList.length ? (
+           <TouchableOpacity style={styles.loadMoreBtn} onPress={() => setDisplayLimitState(prev => ({ ...prev, [activeTab]: (prev[activeTab] || 10) + 10 }))}>
+              <Text style={styles.loadMoreText}>LOAD MORE ARCHIVES</Text>
+           </TouchableOpacity>
+        ) : <View style={{height:50}} />}
+        ListEmptyComponent={!loading ? (
+            <View style={styles.emptyState}>
+                <Ionicons name="file-tray-outline" size={40} color="#334155" />
+                <Text style={styles.emptyText}>The vault is empty.</Text>
+            </View>
+        ) : null}
       />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#000' },
-  header: { marginTop: 60, paddingHorizontal: 20, marginBottom: 20 },
-  headerTitle: { fontSize: 28, fontWeight: '900', color: 'white', letterSpacing: 1 },
-  headerSubtitle: { fontSize: 10, color: '#64748B', letterSpacing: 3, marginTop: 5 },
-  listContent: { paddingHorizontal: 20, paddingBottom: 100 },
-  archetypeCard: { padding: 20, borderRadius: 20, marginBottom: 25, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
-  archHeader: { flexDirection: 'row', alignItems: 'center' },
-  archTitle: { fontSize: 18, fontWeight: 'bold', letterSpacing: 1 },
-  archLevel: { color: '#94A3B8', fontSize: 12 },
-  archDesc: { color: '#CBD5E1', marginTop: 10, fontStyle: 'italic', fontSize: 13 },
-  progressBar: { height: 4, backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 2, marginTop: 15, overflow: 'hidden' },
-  progressFill: { height: '100%' },
-  statsText: { color: '#64748B', fontSize: 10, marginTop: 8, textAlign: 'right' },
-  tabsContainer: { flexDirection: 'row', marginBottom: 20, gap: 10 },
-  tab: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 10, borderRadius: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', backgroundColor: 'rgba(30, 41, 59, 0.3)' },
-  activeTab: { borderColor: '#38BDF8', backgroundColor: 'rgba(56, 189, 248, 0.1)' },
-  activeTabText: { color: '#38BDF8' },
-  activeTabDream: { borderColor: '#6366F1', backgroundColor: 'rgba(99, 102, 241, 0.1)' },
-  activeTabTextDream: { color: '#6366F1' },
-  activeTabChat: { borderColor: '#94A3B8', backgroundColor: 'rgba(148, 163, 184, 0.1)' },
-  activeTabTextChat: { color: '#E2E8F0' },
-  tabText: { color: '#64748B', fontSize: 10, fontWeight: 'bold', letterSpacing: 1 },
-  cardContainer: { backgroundColor: 'rgba(30, 41, 59, 0.4)', borderRadius: 16, marginBottom: 20, borderLeftWidth: 4, borderWidth: 1, borderColor: 'rgba(255,255,255,0.05)', overflow: 'hidden' },
-  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 15, paddingBottom: 5 },
+  container: { flex: 1, backgroundColor: THEME.bg },
+  
+  headerContainer: { marginTop: 60, paddingHorizontal: 24, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
+  headerTitle: { fontSize: 28, fontWeight: '900', color: 'white', letterSpacing: 2 },
+  headerSubtitle: { fontSize: 10, color: THEME.textSub, letterSpacing: 4, fontWeight: '700', marginTop: 4 },
+  refreshButton: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#1e293b', justifyContent: 'center', alignItems: 'center' },
+
+  listContainer: { paddingHorizontal: 20, paddingBottom: 100 },
+
+  // ARCHETYPE
+  archetypeWidget: { padding: 20, borderRadius: 20, marginBottom: 30, borderWidth: 1, borderColor: '#1f2937' },
+  archRow: { flexDirection: 'row', alignItems: 'center', gap: 15 },
+  archIcon: { width: 44, height: 44, borderRadius: 22, justifyContent: 'center', alignItems: 'center' },
+  archTitle: { fontSize: 14, fontWeight: '900', letterSpacing: 1 },
+  archSub: { fontSize: 11, color: '#64748B', marginTop: 2 },
+  countText: { fontSize: 24, fontWeight: 'bold', color: 'white' },
+  progressTrack: { height: 3, backgroundColor: '#1f2937', marginTop: 15, borderRadius: 2, overflow: 'hidden' },
+  progressFill: { height: '100%', borderRadius: 2 },
+
+  // TABS
+  tabsWrapper: { flexDirection: 'row', marginBottom: 25, backgroundColor: '#0f172a', padding: 4, borderRadius: 12, borderWidth: 1, borderColor: '#1e293b' },
+  tabBtn: { flex: 1, paddingVertical: 10, alignItems: 'center', borderRadius: 8 },
+  tabActive: { backgroundColor: '#1e293b' },
+  tabLabel: { fontSize: 10, fontWeight: '800', letterSpacing: 1, color: '#64748B' },
+
+  // VISUAL CARD (SPECTACULAR)
+  cardContainer: { backgroundColor: THEME.cardBg, borderRadius: 24, marginBottom: 30, borderWidth: 1, borderColor: THEME.border, overflow: 'hidden' },
+  imageSection: { height: 280, width: '100%', backgroundColor: '#111827', position: 'relative' },
+  fallbackImage: { justifyContent: 'center', alignItems: 'center' },
+  
+  floatingHeader: { position: 'absolute', top: 15, left: 15, right: 15, flexDirection: 'row', justifyContent: 'space-between' },
+  dateBadge: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: 'rgba(0,0,0,0.6)', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
+  dateDay: { fontSize: 18, fontWeight: 'bold', color: 'white' },
+  dateMonth: { fontSize: 9, fontWeight: 'bold', color: '#cbd5e1' },
+  dateTime: { fontSize: 9, color: '#94a3b8' },
+  iconButton: { width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
+
+  tagBadge: { position: 'absolute', bottom: 15, left: 15, flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20 },
+  tagText: { fontSize: 9, fontWeight: '900', color: 'black', letterSpacing: 1 },
+
+  cardBody: { padding: 20, paddingTop: 10 },
+  actionBlock: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 },
+  actionText: { fontSize: 11, fontWeight: '900', letterSpacing: 2 },
+  summaryText: { color: '#e2e8f0', fontSize: 15, lineHeight: 24, fontWeight: '300' },
+  chatText: { fontFamily: 'Courier', fontSize: 13, color: '#94a3b8' }, // Monospaced feel for logs
+
+  cardFooter: { marginTop: 20, paddingTop: 15, borderTopWidth: 1, borderTopColor: '#1e293b', flexDirection: 'row', justifyContent: 'flex-end' },
+  shareTextBtn: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  shareTextLabel: { fontSize: 10, fontWeight: 'bold', color: THEME.textSub, letterSpacing: 1 },
+
+  // CHAT CARD
+  chatCard: { backgroundColor: '#0f172a', borderRadius: 16, marginBottom: 15, padding: 20, borderWidth: 1, borderColor: '#1e293b' },
+  chatHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 },
+  chatMode: { fontSize: 10, fontWeight: 'bold', color: '#94a3b8', letterSpacing: 1 },
+  chatDate: { fontSize: 10, color: '#475569' },
   dot: { width: 6, height: 6, borderRadius: 3 },
-  cardTag: { fontSize: 10, fontWeight: '900', letterSpacing: 1 },
-  dateBadge: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  dateDay: { color: 'white', fontSize: 24, fontWeight: 'bold' },
-  dateMonth: { color: '#E2E8F0', fontSize: 12, fontWeight: '800', letterSpacing: 1 },
-  dateTime: { color: '#94A3B8', fontSize: 10, fontWeight: '500' },
-  dateTextSimple: { color: '#64748B', fontSize: 10 },
-  textContainer: { paddingHorizontal: 15, paddingBottom: 15 },
-  summaryText: { color: '#E2E8F0', fontSize: 14, lineHeight: 22 },
-  actionBox: { marginTop: 10, flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: 'rgba(245, 158, 11, 0.1)', padding: 10, borderRadius: 8 },
-  actionText: { color: '#F59E0B', fontSize: 12, fontStyle: 'italic', flex: 1 },
-  imageWrapper: { width: '100%', height: 200, position: 'relative' },
-  cardImage: { width: '100%', height: '100%', resizeMode: 'cover' },
-  imageOverlay: { position: 'absolute', bottom: 10, left: 10, flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(0,0,0,0.7)', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6 },
-  imageTag: { color: 'white', fontSize: 10, fontWeight: 'bold' },
-  cardFooter: { flexDirection: 'row', borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.05)', padding: 12 },
-  footerBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
-  footerBtnText: { color: '#94A3B8', fontSize: 10, fontWeight: 'bold', letterSpacing: 1 },
-  chatCard: { backgroundColor: 'rgba(15, 23, 42, 0.6)', borderRadius: 12, marginBottom: 15, padding: 15, borderLeftWidth: 3, borderWidth: 1, borderColor: 'rgba(255,255,255,0.05)' },
-  badgeContainer: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  modeLabel: { fontWeight: 'bold', fontSize: 10, letterSpacing: 1 },
-  actionsBarChat: { marginTop: 10, alignItems: 'flex-end' },
-  actionBtn: { padding: 5 },
-  emptyState: { alignItems: 'center', marginTop: 50 },
-  emptyText: { color: '#475569', marginTop: 10 },
-  loadMoreBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 20, marginBottom: 20 },
-  loadMoreText: { color: '#94A3B8', fontSize: 12, fontWeight: 'bold', letterSpacing: 1 }
+
+  loadMoreBtn: { padding: 20, alignItems: 'center' },
+  loadMoreText: { fontSize: 10, fontWeight: 'bold', color: '#475569', letterSpacing: 2 },
+  emptyState: { alignItems: 'center', marginTop: 50, opacity: 0.5 },
+  emptyText: { marginTop: 10, color: '#64748B' }
 });

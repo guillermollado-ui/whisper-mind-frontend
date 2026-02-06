@@ -1,72 +1,82 @@
-import React, { useState, useCallback, useRef } from 'react';
-import { 
-    View, 
-    Text, 
-    StyleSheet, 
-    ScrollView, 
-    RefreshControl, 
-    Dimensions, 
-    ActivityIndicator, 
-    Platform, 
-    TouchableOpacity, 
-    Alert, 
-    LayoutAnimation, 
-    UIManager 
+/**
+ * (tabs)/insights.tsx — ARCHITECT FINAL FIX
+ * * Modifications:
+ * 1. Force 3 Tasks: Auto-fills missing tasks if backend sends fewer than 3.
+ * 2. Alice Intro: Appends "I've left tasks below..." to the main message.
+ * 3. Task Instruction: Appends "Ask me if you need help" to every task description.
+ * 4. Routing: "Execute Protocol" now always directs to Nexus ('/') for assistance.
+ */
+
+import React, { useState, useCallback, useRef, useEffect } from 'react';
+import {
+    View,
+    Text,
+    StyleSheet,
+    ScrollView,
+    RefreshControl,
+    Dimensions,
+    ActivityIndicator,
+    Platform,
+    TouchableOpacity,
+    LayoutAnimation,
+    UIManager
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { LineChart } from 'react-native-chart-kit';
-import * as SecureStore from 'expo-secure-store';
-import { Audio } from 'expo-av'; 
+import { Audio } from 'expo-av';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as FileSystem from 'expo-file-system/legacy'; 
+import * as FileSystem from 'expo-file-system';
 import ConfettiCannon from 'react-native-confetti-cannon';
+import { API_URL, apiFetch } from '../../utils/api';
+import { useAlert } from '../../src/context/AlertContext';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
     UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
-const API_URL = 'https://wishpermind-backend.onrender.com';
 const SCREEN_WIDTH = Dimensions.get('window').width;
 
-// --- COMPONENTE: BARRA HORIZONTAL ---
-const HorizontalBar = ({ label, value, maxValue, color }) => {
+const THEME = {
+    bg: '#000000',
+    card: '#09090b',
+    border: '#27272a',
+    cyan: '#22d3ee',
+    amber: '#f59e0b',
+    text: '#e4e4e7',
+    subtext: '#71717a',
+    success: '#10b981'
+};
+
+const HorizontalBar = ({ label, value, maxValue, color }: { label: string; value: number; maxValue: number; color: string }) => {
     const percentage = maxValue > 0 ? (value / maxValue) * 100 : 0;
-    
     return (
-        <View style={{ marginBottom: 12 }}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
-                <Text style={{ color: '#94A3B8', fontSize: 12, fontWeight: '600' }}>{label}</Text>
-                <Text style={{ color: color, fontSize: 12, fontWeight: 'bold' }}>{value}</Text>
+        <View style={{ marginBottom: 16 }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
+                <Text style={{ color: THEME.subtext, fontSize: 11, fontWeight: '700', letterSpacing: 1, textTransform: 'uppercase' }}>{label}</Text>
+                <Text style={{ color: color, fontSize: 11, fontWeight: 'bold' }}>{value}</Text>
             </View>
-            <View style={{ height: 12, backgroundColor: '#1E293B', borderRadius: 6, overflow: 'hidden' }}>
-                <View style={{ 
-                    width: `${percentage}%`, 
-                    height: '100%', 
-                    backgroundColor: color, 
-                    borderRadius: 6 
-                }} />
+            <View style={{ height: 4, backgroundColor: '#18181b', borderRadius: 2, overflow: 'hidden' }}>
+                <View style={{ width: `${percentage}%`, height: '100%', backgroundColor: color, borderRadius: 2 }} />
             </View>
         </View>
     );
 };
 
-// --- COMPONENTE: TEXTO EXPANDIBLE ---
-const ExpandableAliceText = ({ text }) => {
+const ExpandableAliceText = ({ text }: { text: string }) => {
     const [isExpanded, setIsExpanded] = useState(false);
     if (!text) return null;
+    
     if (text.length < 150) return <Text style={styles.aliceText}>"{text}"</Text>;
-
+    
     return (
         <View>
             <Text style={styles.aliceText} numberOfLines={isExpanded ? undefined : 4}>
                 "{text}"
             </Text>
-            <TouchableOpacity onPress={() => setIsExpanded(!isExpanded)} style={{ marginBottom: 15, alignSelf: 'flex-start' }}>
-                <Text style={{ color: '#10B981', fontSize: 12, fontWeight: 'bold', letterSpacing: 1 }}>
-                    {isExpanded ? 'SHOW LESS' : 'READ MORE'}
-                </Text>
+            <TouchableOpacity onPress={() => setIsExpanded(!isExpanded)} style={{ marginTop: 8 }}>
+                <Text style={styles.readMore}>{isExpanded ? 'COLLAPSE DATA' : 'READ FULL TRANSMISSION'}</Text>
             </TouchableOpacity>
         </View>
     );
@@ -74,51 +84,51 @@ const ExpandableAliceText = ({ text }) => {
 
 export default function InsightsScreen() {
     const router = useRouter();
-    const confettiRef = useRef(null);
+    const { showAlert } = useAlert();
 
+    const confettiRef = useRef<any>(null);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
-    const [data, setData] = useState(null);
-    
-    // NAVEGACIÓN EMOCIONAL
-    const [aliceStory, setAliceStory] = useState(null); 
-    const [aliceMessage, setAliceMessage] = useState("Tap below to see what Alice sees in you this week.");
-    
-    const [dailyTasks, setDailyTasks] = useState([]); 
+    const [data, setData] = useState<any>(null);
+    const [aliceStory, setAliceStory] = useState<any>(null);
+    const [aliceMessage, setAliceMessage] = useState("Tap below to synchronize.");
+    const [dailyTasks, setDailyTasks] = useState<any[]>([]);
     const [analyzing, setAnalyzing] = useState(false);
-    const [sound, setSound] = useState(null);
+
+    const soundRef = useRef<Audio.Sound | null>(null);
     const [isPlaying, setIsPlaying] = useState(false);
 
-    const getAuthToken = async () => {
-        if (Platform.OS === 'web') return localStorage.getItem('user_token');
-        return await SecureStore.getItemAsync('user_token');
-    };
+    useEffect(() => {
+        return () => {
+            if (soundRef.current) soundRef.current.unloadAsync();
+        };
+    }, []);
 
     const loadCachedData = async () => {
         try {
             const today = new Date().toDateString();
-            
-            const savedTasks = await AsyncStorage.getItem('daily_tasks_cache');
             const savedDate = await AsyncStorage.getItem('daily_tasks_date');
-            if (savedDate === today && savedTasks) {
-                setDailyTasks(JSON.parse(savedTasks));
-            }
+            if (savedDate === today) {
+                const savedTasks = await AsyncStorage.getItem('daily_tasks_cache');
+                if (savedTasks) setDailyTasks(JSON.parse(savedTasks));
 
-            const savedStory = await AsyncStorage.getItem('insights_story_cache');
-            if (savedDate === today && savedStory) {
-                setAliceStory(JSON.parse(savedStory));
+                const savedStory = await AsyncStorage.getItem('insights_story_cache');
+                if (savedStory) {
+                    const parsedStory = JSON.parse(savedStory);
+                    setAliceStory(parsedStory);
+                    if (parsedStory.full_text) {
+                        setAliceMessage(parsedStory.full_text);
+                    }
+                }
             }
-
         } catch (e) { console.log("Cache error", e); }
     };
 
-    const handleToggleTask = (id) => {
+    const handleToggleTask = (id: string) => {
         const updatedTasks = dailyTasks.map(task => {
             if (task.id === id) {
                 const isNowCompleted = !task.completed;
-                if (isNowCompleted && confettiRef.current) {
-                    confettiRef.current.start();
-                }
+                if (isNowCompleted && confettiRef.current) confettiRef.current.start();
                 return { ...task, completed: isNowCompleted };
             }
             return task;
@@ -127,357 +137,377 @@ export default function InsightsScreen() {
         AsyncStorage.setItem('daily_tasks_cache', JSON.stringify(updatedTasks));
     };
 
-    const playAudioData = async (audioData) => {
+    const playAudioData = async (audioData: string) => {
         try {
-            if (sound) await sound.unloadAsync();
-            await Audio.setAudioModeAsync({
-                playsInSilentModeIOS: true, staysActiveInBackground: true, shouldDuckAndroid: true,
-            });
+            if (soundRef.current) {
+                soundRef.current.setOnPlaybackStatusUpdate(null); 
+                await soundRef.current.unloadAsync();
+                soundRef.current = null;
+            }
+            setIsPlaying(false);
+
+            await Audio.setAudioModeAsync({ playsInSilentModeIOS: true, staysActiveInBackground: true, shouldDuckAndroid: true });
+
             let uri = '';
-            if (audioData.startsWith('http')) uri = audioData;
-            else {
+            if (audioData.startsWith('http')) {
+                uri = audioData;
+            } else if (audioData.startsWith('/')) {
+                uri = `${API_URL}${audioData}`;
+            } else {
                 uri = FileSystem.cacheDirectory + 'alice_voice.mp3';
                 await FileSystem.writeAsStringAsync(uri, audioData, { encoding: 'base64' });
             }
+
             const { sound: newSound } = await Audio.Sound.createAsync({ uri }, { shouldPlay: true });
-            setSound(newSound);
+            soundRef.current = newSound;
             setIsPlaying(true);
+
             newSound.setOnPlaybackStatusUpdate((status) => {
-                if (status.isLoaded && status.didJustFinish) setIsPlaying(false);
+                if (status.isLoaded && status.didJustFinish) {
+                    setIsPlaying(false);
+                }
             });
-        } catch (error) { console.error("Audio Playback Error:", error); }
+        } catch (error) { console.error("Audio Error:", error); }
     };
 
-    const fetchInsights = async () => {
+    const stopAudio = async () => {
+        if (soundRef.current) {
+            soundRef.current.setOnPlaybackStatusUpdate(null);
+            try { await soundRef.current.stopAsync(); } catch (e) {}
+            await soundRef.current.unloadAsync();
+            soundRef.current = null;
+        }
+        setIsPlaying(false);
+    };
+
+    const fetchInsights = async (): Promise<any | null> => {
         try {
-            const token = await getAuthToken();
-            if (!token) return;
-            const res = await fetch(`${API_URL}/insights`, { headers: { 'Authorization': `Bearer ${token}` } });
+            const res = await apiFetch('/insights');
             const json = await res.json();
             if (res.ok) {
-                const fakeDistribution = {};
+                const fakeDistribution: Record<string, number> = {};
                 if (!json.category_distribution || Object.keys(json.category_distribution).length === 0) {
-                      fakeDistribution["Resilience"] = 4; fakeDistribution["Clarity"] = 2;
-                      fakeDistribution["Anxiety"] = 1; fakeDistribution["Focus"] = 5;
-                } else { Object.assign(fakeDistribution, json.category_distribution); }
-
+                    fakeDistribution["Resilience"] = 4;
+                    fakeDistribution["Clarity"] = 2;
+                    fakeDistribution["Anxiety"] = 1;
+                    fakeDistribution["Focus"] = 5;
+                } else {
+                    Object.assign(fakeDistribution, json.category_distribution);
+                }
                 const moodData = json.weekly_mood && json.weekly_mood.length > 0 ? json.weekly_mood : [5, 5, 5, 5, 5];
                 const adaptedData = { mood_trend: moodData, category_distribution: fakeDistribution, total_sessions: moodData.length };
                 setData(adaptedData);
                 return adaptedData;
             }
-        } catch (e) { console.error("Fetch error:", e); } 
-        finally { setLoading(false); setRefreshing(false); }
+        } catch (e: any) {
+            if (e.message === 'SESSION_EXPIRED') return null;
+            console.error("Fetch error:", e);
+        } finally {
+            setLoading(false);
+            setRefreshing(false);
+        }
+        return null;
     };
 
-    const runAliceAnalysis = async (currentData) => {
+    const runAliceAnalysis = async (currentData: any) => {
         setAnalyzing(true);
-        if (sound) await sound.unloadAsync();
-        setIsPlaying(false);
-        try {
-            const token = await getAuthToken();
-            if (!token) { Alert.alert("Error", "Please login again"); return; }
+        await stopAudio();
 
+        try {
             const rawMoods = currentData.mood_trend || [];
             const rawEmotions = currentData.category_distribution ? Object.keys(currentData.category_distribution) : [];
             const payload = { mood_trend: rawMoods, top_emotions: rawEmotions };
 
-            const res = await fetch(`${API_URL}/insights/analyze`, {
+            const res = await apiFetch('/insights/analyze', {
                 method: 'POST',
-                headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)
             });
 
             const responseData = await res.json();
             if (res.ok) {
+                // ✅ MODIFICACIÓN 1: Frase de cierre de Alice
+                const closingPhrase = "\n\nHe dejado 3 protocolos aquí debajo que creo que pueden ayudarte a navegar esto. Revísalos con calma.";
+                const fullText = `${responseData.story || ''}\n\n${responseData.analysis_text || ''}${closingPhrase}`.trim();
+                
                 const newStory = {
-                    story: responseData.story || responseData.text, 
+                    story: responseData.story, 
+                    full_text: fullText, 
                     core_pattern: responseData.core_pattern || "Finding your rhythm.",
                     archetype: responseData.archetype || { name: "The Observer", description: "Watching before acting." }
                 };
                 
                 setAliceStory(newStory);
-                setAliceMessage(responseData.analysis_text || responseData.text);
-                
+                setAliceMessage(fullText);
+
                 const today = new Date().toDateString();
                 await AsyncStorage.setItem('insights_story_cache', JSON.stringify(newStory));
                 await AsyncStorage.setItem('daily_tasks_date', today);
 
                 if (responseData.audio) playAudioData(responseData.audio);
+
+                // ✅ MODIFICACIÓN 2: Procesamiento de Tareas (Force 3 + Help Text + Route)
+                let rawTasks = responseData.tasks && Array.isArray(responseData.tasks) ? responseData.tasks : [];
+                const timestamp = Date.now();
                 
-                if (responseData.tasks && Array.isArray(responseData.tasks)) {
-                    const timestamp = Date.now();
-                    const newTasks = responseData.tasks.map((t, i) => ({
+                // Procesamos las tareas que vienen del servidor
+                let newTasks = rawTasks.map((t: any, i: number) => {
+                    const isString = typeof t === 'string';
+                    const originalDesc = isString ? t : (t.description || "No details provided.");
+                    
+                    return {
                         id: `task_${timestamp}_${i}`,
-                        title: t.title, 
-                        time: t.time || "5 min",
-                        description: t.description, 
-                        route: t.route || "/",
-                        completed: false, 
+                        title: isString ? "Mindful Action" : (t.title || "Task"),
+                        time: isString ? "Today" : (t.time || "5 min"),
+                        // Añadimos el texto de ayuda
+                        description: `${originalDesc}\n\n(Si no sabes cómo hacerlo, pulsa el botón y pregúntame en el Nexus.)`,
+                        // Forzamos la ruta al Nexus
+                        route: "/", 
+                        completed: false,
                         expanded: false
-                    }));
-                    setDailyTasks(newTasks);
-                    await AsyncStorage.setItem('daily_tasks_cache', JSON.stringify(newTasks));
+                    };
+                });
+
+                // ✅ MODIFICACIÓN 3: Asegurar siempre 3 tareas
+                while (newTasks.length < 3) {
+                    const extraIndex = newTasks.length + 1;
+                    newTasks.push({
+                        id: `task_backup_${timestamp}_${extraIndex}`,
+                        title: "Deep Check-in",
+                        time: "5 min",
+                        description: "Parece que necesitamos profundizar más. Ve al Nexus y cuéntame qué sientes en este momento.\n\n(Si no sabes cómo hacerlo, pulsa el botón y pregúntame en el Nexus.)",
+                        route: "/",
+                        completed: false,
+                        expanded: false
+                    });
                 }
-            } else { setAliceMessage("Neural link unstable."); }
-        } catch (e) { Alert.alert("Connection Error", e.message); } finally { setAnalyzing(false); }
+                
+                // Si por alguna razón el servidor manda más de 3, cortamos (opcional, pero mantiene el diseño limpio)
+                if (newTasks.length > 3) newTasks = newTasks.slice(0, 3);
+
+                setDailyTasks(newTasks);
+                await AsyncStorage.setItem('daily_tasks_cache', JSON.stringify(newTasks));
+                
+            } else {
+                setAliceMessage("Neural link unstable.");
+            }
+        } catch (e: any) {
+            if (e.message === 'SESSION_EXPIRED') return;
+            showAlert("ANALYSIS ERROR", e.message, "error");
+        } finally {
+            setAnalyzing(false);
+        }
     };
 
-    const toggleExpand = (index) => {
+    const toggleExpand = (index: number) => {
         LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
         const newTasks = [...dailyTasks];
         newTasks[index].expanded = !newTasks[index].expanded;
         setDailyTasks(newTasks);
     };
 
-    // --- ✅ FUNCIÓN MEJORADA: MARCA COMO HECHA + NAVEGA ---
-    const navigateToTask = async (route, taskId) => {
-        // 1. Marcar automáticamente como completada (¡esto dispara el confeti!)
+    const navigateToTask = async (route: string, taskId: string) => {
         handleToggleTask(taskId);
-
         const today = new Date().toDateString();
-        if (route === '/vault') await AsyncStorage.setItem('last_vault_visit', today);
-        else if (route === '/') await AsyncStorage.setItem('last_chat_interaction', today);
         
-        // 2. Pequeño delay para ver el Check y el Confeti antes de irnos
+        // Siempre guardamos interacción de chat ya que vamos al Nexus
+        await AsyncStorage.setItem('last_chat_interaction', today);
+        
+        // Redirección forzada al Nexus ('/') como pidió el Arquitecto
         setTimeout(() => {
-            if (route === '/') router.replace('/'); 
-            else if (route === '/vault') router.replace('/vault');
-        }, 1200); // 1.2 segundos de gloria antes de navegar
+            router.replace('/'); 
+        }, 800);
     };
 
-    useFocusEffect(useCallback(() => { 
+    useFocusEffect(useCallback(() => {
         const load = async () => {
-            const d = await fetchInsights();
-            if (!analyzing) await loadCachedData(); 
+            await loadCachedData();
+            await fetchInsights();
         };
         load();
-        return () => { if(sound) sound.unloadAsync(); };
+        return () => { stopAudio(); };
     }, []));
 
     const handleManualAnalyze = async () => {
-        if(data) runAliceAnalysis(data);
-        else fetchInsights().then(d => { if(d) runAliceAnalysis(d); });
+        if (data) {
+            runAliceAnalysis(data);
+        } else {
+            const d = await fetchInsights();
+            if (d) runAliceAnalysis(d);
+        }
     };
 
     const chartConfig = {
-        backgroundGradientFrom: "#1e293b", backgroundGradientTo: "#0f172a",
-        color: (opacity = 1) => `rgba(56, 189, 248, ${opacity})`, strokeWidth: 3,
-        propsForDots: { r: "5", strokeWidth: "2", stroke: "#38BDF8" },
-        propsForBackgroundLines: { strokeDasharray: "" }, decimalPlaces: 0, 
+        backgroundGradientFrom: "#000000",
+        backgroundGradientTo: "#000000",
+        fillShadowGradient: THEME.cyan,
+        fillShadowGradientOpacity: 0.2,
+        color: (opacity = 1) => `rgba(34, 211, 238, ${opacity})`,
+        strokeWidth: 2,
+        propsForDots: { r: "4", strokeWidth: "2", stroke: THEME.bg },
+        propsForBackgroundLines: { strokeDasharray: "", stroke: "#18181b" },
+        decimalPlaces: 0,
     };
 
     return (
         <View style={styles.container}>
-            <LinearGradient colors={['#0f172a', '#000000']} style={StyleSheet.absoluteFill} />
-            
             <View style={styles.header}>
                 <Text style={styles.headerTitle}>INSIGHTS</Text>
-                <Text style={styles.headerSubtitle}>YOUR EMOTIONAL BLUEPRINT</Text>
+                <Text style={styles.headerSubtitle}>INTERNAL COMPASS</Text>
             </View>
 
-            <ScrollView 
+            <ScrollView
                 contentContainerStyle={styles.scrollContent}
-                refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => {setRefreshing(true); fetchInsights();}} tintColor="#fff" />}
+                refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchInsights(); }} tintColor="#fff" />}
             >
                 {loading || !data ? (
-                    <ActivityIndicator size="large" color="#38BDF8" style={{marginTop: 50}} />
+                    <ActivityIndicator size="large" color={THEME.cyan} style={{marginTop: 50}} />
                 ) : (
                     <>
-                        {/* --- BLOQUE 1: YOUR EMOTIONAL STORY --- */}
-                        <LinearGradient 
-                            colors={['#1e293b', '#0f172a']} 
-                            style={styles.storyCard}
-                        >
+                        {/* Hero Card */}
+                        <View style={styles.heroCard}>
+                            <LinearGradient colors={['rgba(34, 211, 238, 0.05)', 'transparent']} style={StyleSheet.absoluteFill} />
                             <View style={styles.archetypeHeader}>
                                 <View>
-                                    <Text style={styles.storyLabel}>THIS WEEK'S ARCHETYPE</Text>
-                                    <Text style={styles.archetypeTitle}>
-                                        {aliceStory?.archetype?.name || "The Unwritten Story"}
-                                    </Text>
-                                    <Text style={styles.archetypeDesc}>
-                                        {aliceStory?.archetype?.description || "Tap the button below to discover who you've been this week."}
-                                    </Text>
+                                    <Text style={styles.storyLabel}>CURRENT ARCHETYPE</Text>
+                                    <Text style={styles.archetypeTitle}>{aliceStory?.archetype?.name || "Awaiting Data..."}</Text>
                                 </View>
-                                <Ionicons name="finger-print-outline" size={40} color="rgba(56, 189, 248, 0.3)" />
+                                <View style={styles.iconBox}>
+                                    <Ionicons name="finger-print-outline" size={24} color={THEME.cyan} />
+                                </View>
                             </View>
-
                             <View style={styles.divider} />
-
-                            {aliceStory?.core_pattern && (
-                                <View style={styles.patternBox}>
-                                    <Ionicons name="key-outline" size={16} color="#F59E0B" />
-                                    <Text style={styles.patternText}>
-                                        "{aliceStory.core_pattern}"
-                                    </Text>
-                                </View>
-                            )}
-
+                            {aliceStory?.core_pattern && <Text style={styles.patternText}>/// PATTERN: {aliceStory.core_pattern.toUpperCase()}</Text>}
+                            
                             {analyzing ? (
                                 <View style={{flexDirection:'row', alignItems:'center', gap:10, paddingVertical: 20}}>
-                                    <ActivityIndicator color="#10B981" size="small" />
-                                    <Text style={styles.analyzingText}>Reading your nervous system...</Text>
+                                    <ActivityIndicator color={THEME.cyan} size="small" />
+                                    <Text style={styles.analyzingText}>Synchronizing...</Text>
                                 </View>
                             ) : (
-                                <View style={{marginTop: 15}}>
-                                    <ExpandableAliceText text={aliceStory?.story || aliceMessage} />
+                                <View style={{marginTop: 10}}>
+                                    <ExpandableAliceText text={aliceMessage} />
                                 </View>
                             )}
-
-                            <TouchableOpacity 
-                                style={[styles.analyzeBtn, isPlaying && {borderColor: '#38BDF8', backgroundColor: 'rgba(56, 189, 248, 0.1)'}]} 
-                                onPress={handleManualAnalyze} disabled={analyzing}
+                            
+                            <TouchableOpacity
+                                style={[styles.analyzeBtn, isPlaying && { borderColor: THEME.cyan, backgroundColor: 'rgba(34,211,238,0.1)' }]}
+                                onPress={isPlaying ? stopAudio : handleManualAnalyze}
+                                disabled={analyzing}
                             >
-                                <Ionicons name={isPlaying ? "volume-high" : "eye-outline"} size={16} color={isPlaying ? "#38BDF8" : "#10B981"} style={{marginRight: 8}} />
-                                <Text style={[styles.analyzeBtnText, isPlaying && {color: '#38BDF8'}]}>
-                                    {analyzing ? "CONNECTING..." : isPlaying ? "LISTENING TO ALICE" : "SEE WHAT ALICE SEES"}
+                                <Ionicons name={isPlaying ? "pause" : "play"} size={12} color={isPlaying ? THEME.cyan : THEME.text} />
+                                <Text style={[styles.analyzeBtnText, isPlaying && {color: THEME.cyan}]}>
+                                    {analyzing ? "CALCULATING..." : isPlaying ? "STOP AUDIO" : "INITIATE ANALYSIS"}
                                 </Text>
                             </TouchableOpacity>
-                        </LinearGradient>
-
-                        {/* --- BLOQUE 2: GRÁFICOS --- */}
-                        <View style={styles.card}>
-                            <View style={styles.cardHeader}>
-                                <Ionicons name="pulse-outline" size={20} color="#38BDF8" />
-                                <Text style={styles.cardTitle}>NERVOUS SYSTEM RHYTHM</Text>
-                            </View>
-                            {data.mood_trend && data.mood_trend.length > 1 ? (
-                                <LineChart 
-                                    data={{ labels: [], datasets: [{ data: data.mood_trend }] }} 
-                                    width={SCREEN_WIDTH - 60} height={200} 
-                                    yAxisLabel="" yAxisSuffix="" 
-                                    chartConfig={chartConfig} 
-                                    bezier 
-                                    style={styles.chart} 
-                                />
-                            ) : (<View style={styles.emptyState}><Text style={styles.emptyText}>Not enough data points.</Text></View>)}
                         </View>
 
-                        <View style={styles.card}>
-                            <View style={styles.cardHeader}>
-                                <Ionicons name="prism-outline" size={20} color="#F59E0B" />
-                                <Text style={[styles.cardTitle, { color: '#F59E0B' }]}>WHAT'S LIVING INSIDE YOU</Text>
-                            </View>
+                        {/* Mood Chart */}
+                        <View style={[styles.sectionHeader]}>
+                            <Ionicons name="pulse" size={14} color={THEME.subtext} />
+                            <Text style={styles.sectionTitle}>NERVOUS SYSTEM RHYTHM</Text>
+                        </View>
+                        <View style={styles.chartContainer}>
+                            {data.mood_trend && data.mood_trend.length > 1 ? (
+                                <LineChart
+                                    data={{ labels: [], datasets: [{ data: data.mood_trend }] }}
+                                    width={SCREEN_WIDTH - 40} height={180}
+                                    yAxisLabel="" yAxisSuffix="" chartConfig={chartConfig} bezier
+                                    style={styles.chart} withInnerLines={true} withOuterLines={false} withVerticalLines={false} withHorizontalLabels={false}
+                                />
+                            ) : (<Text style={styles.emptyText}>Insufficient data points.</Text>)}
+                        </View>
+
+                        {/* Emotional Spectrum */}
+                        <View style={[styles.sectionHeader, {marginTop: 20}]}>
+                            <Ionicons name="prism" size={14} color={THEME.subtext} />
+                            <Text style={styles.sectionTitle}>EMOTIONAL SPECTRUM</Text>
+                        </View>
+                        <View style={styles.spectrumContainer}>
                             {data.category_distribution ? (
-                                <View style={{ marginTop: 10 }}>
+                                <View>
                                     {Object.entries(data.category_distribution).map(([label, value], i) => (
-                                        <HorizontalBar 
-                                            key={i} 
-                                            label={label} 
-                                            value={value} 
-                                            maxValue={5} 
-                                            color="#F59E0B"
-                                        />
+                                        <HorizontalBar key={i} label={label} value={value as number} maxValue={5} color={THEME.amber} />
                                     ))}
                                 </View>
-                            ) : (
-                                <View style={styles.emptyState}><Text style={styles.emptyText}>No emotional data yet.</Text></View>
-                            )}
+                            ) : (<Text style={styles.emptyText}>No spectrum data.</Text>)}
                         </View>
 
-                        {/* --- BLOQUE 3: PROTOCOLOS --- */}
-                        <View style={styles.tasksContainer}>
+                        {/* Tasks */}
+                        <View style={[styles.sectionHeader, {marginTop: 20}]}>
+                            <Ionicons name="git-network" size={14} color={THEME.subtext} />
                             <Text style={styles.sectionTitle}>ALIGNMENT PROTOCOLS</Text>
+                        </View>
+                        <View style={styles.tasksContainer}>
                             {dailyTasks.length > 0 ? dailyTasks.map((task, index) => (
-                                <View key={task.id || index} style={[styles.taskCard, task.completed && styles.taskCardDone]}>
+                                <View key={task.id || index} style={[styles.taskCard, task.completed && {borderColor: THEME.success}]}>
                                     <View style={styles.taskHeaderRow}>
-                                        <TouchableOpacity 
-                                            style={[styles.checkBox, task.completed && styles.checkBoxDone]} 
-                                            onPress={() => handleToggleTask(task.id)}
-                                        >
-                                            {task.completed ? <Ionicons name="checkmark" size={14} color="#000" /> : <Ionicons name="radio-button-off" size={12} color="#475569" />}
+                                        <TouchableOpacity style={[styles.checkBox, task.completed && { borderColor: THEME.success, backgroundColor: 'rgba(16, 185, 129, 0.1)' }]} onPress={() => handleToggleTask(task.id)}>
+                                            {task.completed && <Ionicons name="checkmark" size={10} color={THEME.success} />}
                                         </TouchableOpacity>
-
                                         <TouchableOpacity style={{flex: 1, marginLeft: 15}} onPress={() => toggleExpand(index)}>
-                                            <Text style={[styles.taskTitle, task.completed && styles.taskTextDone]}>{task.title}</Text>
-                                            <Text style={styles.taskTime}>{task.time}</Text>
+                                            <Text style={[styles.taskTitle, task.completed && {color: THEME.subtext, textDecorationLine: 'line-through'}]}>{task.title}</Text>
+                                            <Text style={styles.taskTime}>{task.time.toUpperCase()}</Text>
                                         </TouchableOpacity>
-
-                                        <TouchableOpacity onPress={() => toggleExpand(index)} style={styles.expandBtn}>
-                                            <Ionicons name={task.expanded ? "chevron-up" : "chevron-down"} size={20} color="#64748B" />
+                                        <TouchableOpacity onPress={() => toggleExpand(index)} style={{padding: 5}}>
+                                            <Ionicons name={task.expanded ? "remove" : "add"} size={16} color={THEME.subtext} />
                                         </TouchableOpacity>
                                     </View>
-
                                     {task.expanded && (
                                         <View style={styles.taskBody}>
-                                            <View style={styles.divider} />
                                             <Text style={styles.taskDesc}>{task.description}</Text>
-                                            {/* Si NO está completada, mostramos el botón INITIATE */}
                                             {!task.completed && (
-                                                <TouchableOpacity style={styles.actionLink} onPress={() => navigateToTask(task.route, task.id)}>
-                                                    <Text style={styles.actionLinkText}>INITIATE</Text>
-                                                    <Ionicons name="arrow-forward" size={12} color="#38BDF8" />
+                                                <TouchableOpacity style={styles.actionButton} onPress={() => navigateToTask(task.route, task.id)}>
+                                                    <Text style={styles.actionButtonText}>EXECUTE PROTOCOL</Text>
+                                                    <Ionicons name="arrow-forward" size={10} color={THEME.cyan} />
                                                 </TouchableOpacity>
                                             )}
                                         </View>
                                     )}
                                 </View>
-                            )) : (
-                                <Text style={styles.emptyText}>Waiting for Alice's input...</Text>
-                            )}
+                            )) : (<Text style={styles.emptyText}>Protocols inactive. Awaiting Alice.</Text>)}
                         </View>
                     </>
                 )}
-                <View style={{height: 100}} /> 
+                <View style={{height: 100}} />
             </ScrollView>
-
-            <ConfettiCannon 
-                count={200} 
-                origin={{x: -10, y: 0}} 
-                autoStart={false} 
-                ref={confettiRef} 
-                fadeOut={true}
-                fallSpeed={3000}
-                zIndex={1000} 
-            />
+            <ConfettiCannon count={150} origin={{x: -10, y: 0}} autoStart={false} ref={confettiRef} fadeOut={true} fallSpeed={3500} zIndex={1000} />
         </View>
     );
 }
 
 const styles = StyleSheet.create({
-    container: { flex: 1, backgroundColor: '#000' },
+    container: { flex: 1, backgroundColor: THEME.bg },
     header: { marginTop: 60, paddingHorizontal: 20, marginBottom: 20 },
-    headerTitle: { fontSize: 28, fontWeight: '900', color: 'white', letterSpacing: 1 },
-    headerSubtitle: { fontSize: 10, color: '#64748B', letterSpacing: 3, marginTop: 5 },
+    headerTitle: { fontSize: 24, fontWeight: '900', color: THEME.text, letterSpacing: 2 },
+    headerSubtitle: { fontSize: 10, color: THEME.subtext, letterSpacing: 3, marginTop: 4, fontWeight: '700' },
     scrollContent: { paddingHorizontal: 20 },
-    
-    // ESTILOS NUEVOS STORY CARD
-    storyCard: { padding: 20, borderRadius: 20, marginBottom: 30, borderWidth: 1, borderColor: 'rgba(56, 189, 248, 0.2)' },
+    heroCard: { backgroundColor: THEME.card, borderRadius: 16, padding: 20, marginBottom: 30, borderWidth: 1, borderColor: THEME.border, overflow: 'hidden' },
     archetypeHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
-    storyLabel: { color: '#64748B', fontSize: 10, fontWeight: 'bold', letterSpacing: 1, marginBottom: 5 },
-    archetypeTitle: { color: '#38BDF8', fontSize: 22, fontWeight: '900', letterSpacing: 0.5, marginBottom: 5 },
-    archetypeDesc: { color: '#94A3B8', fontSize: 14, fontStyle: 'italic', maxWidth: '90%' },
-    
-    patternBox: { backgroundColor: 'rgba(245, 158, 11, 0.1)', padding: 12, borderRadius: 10, flexDirection: 'row', gap: 10, alignItems: 'center', marginBottom: 15 },
-    patternText: { color: '#F59E0B', fontSize: 13, fontWeight: 'bold', fontStyle: 'italic', flex: 1 },
-    
-    aliceText: { color: '#E2E8F0', fontSize: 15, lineHeight: 24, marginBottom: 15 },
-    analyzingText: { color: '#64748B', fontSize: 14, fontStyle: 'italic' },
-    
-    analyzeBtn: { marginTop: 10, backgroundColor: 'rgba(16, 185, 129, 0.1)', paddingVertical: 14, borderRadius: 12, alignItems: 'center', borderWidth: 1, borderColor: '#10B981', flexDirection: 'row', justifyContent: 'center' },
-    analyzeBtnText: { color: '#10B981', fontWeight: 'bold', fontSize: 12, letterSpacing: 1 },
-
+    storyLabel: { color: THEME.cyan, fontSize: 9, fontWeight: 'bold', letterSpacing: 1.5, marginBottom: 6 },
+    archetypeTitle: { color: THEME.text, fontSize: 18, fontWeight: '800', letterSpacing: 0.5 },
+    iconBox: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(34, 211, 238, 0.1)', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: 'rgba(34, 211, 238, 0.2)' },
+    divider: { height: 1, backgroundColor: THEME.border, marginVertical: 15 },
+    patternText: { color: THEME.amber, fontSize: 10, fontWeight: 'bold', fontStyle: 'italic', letterSpacing: 1, marginBottom: 10 },
+    aliceText: { color: '#d4d4d8', fontSize: 14, lineHeight: 22 },
+    readMore: { color: THEME.subtext, fontSize: 10, marginTop: 8, fontWeight: '700', letterSpacing: 1 },
+    analyzingText: { color: THEME.subtext, fontSize: 12, fontStyle: 'italic' },
+    analyzeBtn: { marginTop: 20, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 12, borderRadius: 8, borderWidth: 1, borderColor: THEME.border, backgroundColor: 'rgba(255,255,255,0.03)' },
+    analyzeBtnText: { color: THEME.text, fontSize: 10, fontWeight: 'bold', letterSpacing: 2 },
+    sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 },
+    sectionTitle: { color: THEME.subtext, fontSize: 10, fontWeight: '700', letterSpacing: 2 },
+    chartContainer: { alignItems: 'center', marginBottom: 10 },
+    chart: { borderRadius: 16, paddingRight: 0 },
+    spectrumContainer: { backgroundColor: THEME.card, padding: 20, borderRadius: 16, borderWidth: 1, borderColor: THEME.border },
     tasksContainer: { marginBottom: 30 },
-    sectionTitle: { color: '#64748B', fontSize: 10, letterSpacing: 2, marginBottom: 15, fontWeight: 'bold' },
-    taskCard: { backgroundColor: '#1e293b', borderRadius: 12, marginBottom: 10, borderWidth: 1, borderColor: '#334155', overflow: 'hidden' },
-    taskCardDone: { borderColor: '#10B981', backgroundColor: 'rgba(16, 185, 129, 0.1)' },
-    taskHeaderRow: { flexDirection: 'row', alignItems: 'center', padding: 15 },
-    checkBox: { width: 24, height: 24, borderRadius: 6, borderWidth: 2, borderColor: '#475569', justifyContent: 'center', alignItems: 'center' },
-    checkBoxDone: { backgroundColor: '#10B981', borderColor: '#10B981' },
-    taskTitle: { color: 'white', fontSize: 14, fontWeight: '500' },
-    taskTextDone: { color: '#94A3B8', textDecorationLine: 'line-through' },
-    taskTime: { color: '#64748B', fontSize: 10, marginTop: 2 },
-    expandBtn: { padding: 5 },
-    taskBody: { paddingHorizontal: 15, paddingBottom: 15 },
-    divider: { height: 1, backgroundColor: 'rgba(255,255,255,0.1)', marginBottom: 10, marginTop: 10 },
-    taskDesc: { color: '#94A3B8', fontSize: 13, lineHeight: 20, marginBottom: 15 },
-    actionLink: { flexDirection: 'row', alignItems: 'center', gap: 5, alignSelf: 'flex-start', paddingVertical: 5, paddingHorizontal: 10, backgroundColor: 'rgba(56, 189, 248, 0.1)', borderRadius: 6 },
-    actionLinkText: { color: '#38BDF8', fontSize: 10, fontWeight: 'bold', letterSpacing: 1 },
-    
-    card: { backgroundColor: '#1e293b', borderRadius: 20, padding: 20, marginBottom: 20, borderWidth: 1, borderColor: '#334155' },
-    cardHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 20 },
-    cardTitle: { color: '#38BDF8', fontSize: 14, fontWeight: 'bold', letterSpacing: 1 },
-    chart: { borderRadius: 16, marginVertical: 8, alignSelf: 'center' },
-    emptyState: { height: 150, justifyContent: 'center', alignItems: 'center' },
-    emptyText: { color: '#94A3B8', fontSize: 14 },
+    taskCard: { backgroundColor: THEME.card, borderRadius: 12, marginBottom: 12, borderWidth: 1, borderColor: THEME.border, overflow: 'hidden' },
+    taskHeaderRow: { flexDirection: 'row', alignItems: 'center', padding: 16 },
+    checkBox: { width: 18, height: 18, borderRadius: 4, borderWidth: 1, borderColor: THEME.subtext, justifyContent: 'center', alignItems: 'center' },
+    taskTitle: { color: THEME.text, fontSize: 13, fontWeight: '600', letterSpacing: 0.5 },
+    taskTime: { color: THEME.subtext, fontSize: 9, marginTop: 4, letterSpacing: 1 },
+    taskBody: { paddingHorizontal: 16, paddingBottom: 16, paddingTop: 0 },
+    taskDesc: { color: '#a1a1aa', fontSize: 12, lineHeight: 18, marginBottom: 15 },
+    actionButton: { flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 6, backgroundColor: 'rgba(34, 211, 238, 0.1)' },
+    actionButtonText: { color: THEME.cyan, fontSize: 9, fontWeight: 'bold', letterSpacing: 1 },
+    emptyText: { color: THEME.subtext, fontSize: 12, fontStyle: 'italic', textAlign: 'center', marginTop: 10 }
 });
