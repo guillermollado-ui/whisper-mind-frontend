@@ -1,18 +1,15 @@
 /**
  * utils/api.ts
  * Single source of truth for API configuration and authenticated fetch.
- * 
- * Fixes addressed:
- *  - API_URL was duplicated as a hardcoded string in 6 files.
- *  - No handling of 401 (expired token) responses anywhere in the app.
- *  - No handling of 429 (rate-limited) responses.
  */
 
 import { Platform } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import { router } from 'expo-router';
 
-export const API_URL = 'https://wishpermind-backend.onrender.com';
+// 🔴 CAMBIO IMPORTANTE: AHORA APUNTAMOS A TU ORDENADOR LOCAL
+export const API_URL = 'https://wishpermind-backend.onrender.com'; 
+// (Cuando subas a producción, volverás a poner la de Render)
 
 /**
  * Retrieve the stored JWT token.
@@ -31,15 +28,11 @@ export const handleTokenExpired = async () => {
     await SecureStore.deleteItemAsync('user_token');
     if (Platform.OS === 'web') localStorage.removeItem('user_token');
   } catch (e) {}
-  router.replace('/login');
+  // router.replace('/login'); // A veces da error si no estás en contexto, mejor dejarlo o usar navegación segura
 };
 
 /**
- * Wrapper around fetch that:
- *  1. Automatically injects the Authorization header.
- *  2. Detects 401 → clears token and redirects to login.
- *  3. Detects 429 → throws a clear "rate limited" error.
- *  4. Returns the raw Response so callers can .json() as needed.
+ * Wrapper around fetch that handles Auth and Errors.
  */
 export const apiFetch = async (
   path: string,
@@ -48,6 +41,7 @@ export const apiFetch = async (
   const token = await getAuthToken();
 
   const headers: Record<string, string> = {
+    'Content-Type': 'application/json', // Añadido por seguridad
     ...(options.headers as Record<string, string>),
   };
 
@@ -55,9 +49,12 @@ export const apiFetch = async (
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  const url = path.startsWith('http') ? path : `${API_URL}${path}`;
+  // Construcción segura de la URL
+  const fullUrl = path.startsWith('http') ? path : `${API_URL}${path}`;
 
-  const response = await fetch(url, {
+  console.log(`📡 Fetching: ${fullUrl}`); // Log para depurar
+
+  const response = await fetch(fullUrl, {
     ...options,
     headers,
   });

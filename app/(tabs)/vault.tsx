@@ -1,5 +1,5 @@
 /**
- * (tabs)/vault.tsx — THE SPECTACULAR GALLERY UPGRADE
+ * (tabs)/vault.tsx — THE SPECTACULAR GALLERY UPGRADE + MATERIALIZATION LINK
  * * Design: Immersive Cards, Glassmorphism, Cyber-Typography.
  */
 
@@ -14,7 +14,9 @@ import {
   FlatList,
   Share,
   Dimensions,
-  StatusBar
+  StatusBar,
+  Linking, // <--- IMPORTANTE: Para abrir el navegador
+  ActivityIndicator
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -34,8 +36,9 @@ const THEME = {
   textMain: '#F8FAFC',
   textSub: '#94A3B8',
   accentJournal: '#38BDF8',
-  accentDream: '#818CF8', // Indigo suave para sueños
-  accentLog: '#64748B'
+  accentDream: '#818CF8',
+  accentLog: '#64748B',
+  accentGold: '#F59E0B' // <--- Nuevo color para el Libro
 };
 
 const ARCHETYPES = [
@@ -68,7 +71,6 @@ const ExpandableText = ({ text, color, isChat = false }: { text: string; color: 
   if (!text) return null;
   const cleanText = text.replace(/^"|"$/g, '');
   
-  // Limite visual
   const limit = isChat ? 120 : 150; 
   if (cleanText.length < limit) return <Text style={[styles.summaryText, isChat && styles.chatText]}>{cleanText}</Text>;
 
@@ -94,6 +96,7 @@ export default function VaultScreen() {
   const [chatItems, setChatItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [generatingLink, setGeneratingLink] = useState(false); // <--- Estado para el botón mágico
   
   const [displayLimitState, setDisplayLimitState] = useState<Record<string, number>>({
     journal: 10, dream: 10, chats: 10
@@ -130,6 +133,29 @@ export default function VaultScreen() {
 
   useFocusEffect(useCallback(() => { fetchAllData(); }, []));
   const onRefresh = () => { setRefreshing(true); fetchAllData(); };
+
+  // --- 🪄 LA MAGIA: ABRIR EL LIBRO WEB ---
+  const openAtelier = async () => {
+    setGeneratingLink(true);
+    try {
+      // 1. Pedimos a Alice un "Ticket de Entrada" usando POST
+      const response = await apiFetch('/auth/generate-shop-ticket', {
+        method: 'POST'
+      });
+      const data = await response.json();
+      
+      if (data && data.url) {
+        // 2. Abrimos el navegador del móvil con ese enlace mágico
+        await Linking.openURL(data.url);
+      } else {
+        showAlert("ACCESS DENIED", "Alice could not generate the pass.", "error");
+      }
+    } catch (error) {
+      showAlert("CONNECTION ERROR", "Ensure Alice is running.", "error");
+    } finally {
+      setGeneratingLink(false);
+    }
+  };
 
   const fullList = activeTab === 'chats' ? chatItems : vaultItems.filter(item => {
     const itemMode = item.mode || (item.summary ? 'journal' : 'dream');
@@ -195,11 +221,10 @@ export default function VaultScreen() {
             />
           ) : (
             <View style={[StyleSheet.absoluteFill, styles.fallbackImage]}>
-               <Ionicons name="aperture-outline" size={40} color="#1e293b" />
+                <Ionicons name="aperture-outline" size={40} color="#1e293b" />
             </View>
           )}
           
-          {/* Top Gradient for text readability if needed */}
           <LinearGradient colors={['rgba(0,0,0,0.6)', 'transparent']} style={{position:'absolute', top:0, width:'100%', height: 80}} />
 
           {/* Floating Badges */}
@@ -218,10 +243,8 @@ export default function VaultScreen() {
              )}
           </View>
 
-          {/* Bottom Gradient blending into body */}
           <LinearGradient colors={['transparent', '#09090b']} style={{position:'absolute', bottom:0, width:'100%', height: 100}} />
           
-          {/* Tag on Image */}
           <View style={[styles.tagBadge, { backgroundColor: accentColor }]}>
              <Ionicons name={isJournal ? "book" : "planet"} size={10} color="black" />
              <Text style={styles.tagText}>{activeTab.toUpperCase()}</Text>
@@ -314,6 +337,34 @@ export default function VaultScreen() {
                </View>
             </LinearGradient>
 
+            {/* --- 🌟 MATERIALIZE MEMORY BUTTON (NUEVO) --- */}
+            <TouchableOpacity 
+                style={styles.materializeBtn}
+                onPress={openAtelier}
+                disabled={generatingLink}
+            >
+                <LinearGradient
+                    colors={['#78350f', '#F59E0B']} // Ámbar/Oro Oscuro
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={styles.materializeGradient}
+                >
+                    {generatingLink ? (
+                        <ActivityIndicator color="white" />
+                    ) : (
+                        <>
+                            <Ionicons name="book" size={20} color="white" />
+                            <View>
+                                <Text style={styles.materializeTitle}>MATERIALIZE MEMORY</Text>
+                                <Text style={styles.materializeSub}>OPEN CHRONICLE OF MONTH</Text>
+                            </View>
+                            <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.5)" style={{marginLeft: 'auto'}} />
+                        </>
+                    )}
+                </LinearGradient>
+            </TouchableOpacity>
+            {/* ------------------------------------------------ */}
+
             {/* TAB SELECTOR */}
             <View style={styles.tabsWrapper}>
                <TouchableOpacity onPress={() => handleTabChange('journal')} style={[styles.tabBtn, activeTab === 'journal' && styles.tabActive]}>
@@ -355,7 +406,7 @@ const styles = StyleSheet.create({
   listContainer: { paddingHorizontal: 20, paddingBottom: 100 },
 
   // ARCHETYPE
-  archetypeWidget: { padding: 20, borderRadius: 20, marginBottom: 30, borderWidth: 1, borderColor: '#1f2937' },
+  archetypeWidget: { padding: 20, borderRadius: 20, marginBottom: 20, borderWidth: 1, borderColor: '#1f2937' },
   archRow: { flexDirection: 'row', alignItems: 'center', gap: 15 },
   archIcon: { width: 44, height: 44, borderRadius: 22, justifyContent: 'center', alignItems: 'center' },
   archTitle: { fontSize: 14, fontWeight: '900', letterSpacing: 1 },
@@ -363,6 +414,12 @@ const styles = StyleSheet.create({
   countText: { fontSize: 24, fontWeight: 'bold', color: 'white' },
   progressTrack: { height: 3, backgroundColor: '#1f2937', marginTop: 15, borderRadius: 2, overflow: 'hidden' },
   progressFill: { height: '100%', borderRadius: 2 },
+
+  // BOTÓN MATERIALIZE (ESTILO PREMIUM)
+  materializeBtn: { borderRadius: 16, marginBottom: 30, overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(245, 158, 11, 0.3)', shadowColor: '#F59E0B', shadowOffset: {width:0, height:4}, shadowOpacity: 0.2, shadowRadius: 8, elevation: 5 },
+  materializeGradient: { flexDirection: 'row', alignItems: 'center', padding: 16, gap: 12 },
+  materializeTitle: { color: 'white', fontWeight: '900', fontSize: 13, letterSpacing: 1.5 },
+  materializeSub: { color: 'rgba(255,255,255,0.7)', fontSize: 9, letterSpacing: 1, marginTop: 2 },
 
   // TABS
   tabsWrapper: { flexDirection: 'row', marginBottom: 25, backgroundColor: '#0f172a', padding: 4, borderRadius: 12, borderWidth: 1, borderColor: '#1e293b' },
