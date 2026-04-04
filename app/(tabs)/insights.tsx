@@ -1,10 +1,5 @@
 /**
- * (tabs)/insights.tsx — ARCHITECT FINAL FIX
- * * Modifications:
- * 1. Force 3 Tasks: Auto-fills missing tasks if backend sends fewer than 3.
- * 2. Alice Intro: Appends "I've left tasks below..." to the main message.
- * 3. Task Instruction: Appends "Ask me if you need help" to every task description.
- * 4. Routing: "Execute Protocol" now always directs to Nexus ('/') for assistance.
+ * (tabs)/insights.tsx — TRANSLATED & SECURE (With Language Pre-wiring)
  */
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';
@@ -31,6 +26,10 @@ import * as FileSystem from 'expo-file-system';
 import ConfettiCannon from 'react-native-confetti-cannon';
 import { API_URL, apiFetch } from '../../utils/api';
 import { useAlert } from '../../src/context/AlertContext';
+// 🌍 IMPORTACIÓN DEL MOTOR DE IDIOMAS
+import { useLanguage } from '../../src/context/LanguageContext';
+// ✅ [NUEVO] Importamos la Guía de Iniciación
+import InitiationOverlay from '../../components/InitiationOverlay';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
     UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -64,7 +63,8 @@ const HorizontalBar = ({ label, value, maxValue, color }: { label: string; value
     );
 };
 
-const ExpandableAliceText = ({ text }: { text: string }) => {
+// 🌍 Componente de texto traducido
+const ExpandableAliceText = ({ text, t }: { text: string; t: any }) => {
     const [isExpanded, setIsExpanded] = useState(false);
     if (!text) return null;
     
@@ -76,7 +76,7 @@ const ExpandableAliceText = ({ text }: { text: string }) => {
                 "{text}"
             </Text>
             <TouchableOpacity onPress={() => setIsExpanded(!isExpanded)} style={{ marginTop: 8 }}>
-                <Text style={styles.readMore}>{isExpanded ? 'COLLAPSE DATA' : 'READ FULL TRANSMISSION'}</Text>
+                <Text style={styles.readMore}>{isExpanded ? t('insights.hero.read_less') : t('insights.hero.read_more')}</Text>
             </TouchableOpacity>
         </View>
     );
@@ -85,13 +85,14 @@ const ExpandableAliceText = ({ text }: { text: string }) => {
 export default function InsightsScreen() {
     const router = useRouter();
     const { showAlert } = useAlert();
+    const { t, language } = useLanguage(); // 🌍 Usamos el hook de idioma
 
     const confettiRef = useRef<any>(null);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [data, setData] = useState<any>(null);
     const [aliceStory, setAliceStory] = useState<any>(null);
-    const [aliceMessage, setAliceMessage] = useState("Tap below to synchronize.");
+    const [aliceMessage, setAliceMessage] = useState(t('insights.hero.sync_message'));
     const [dailyTasks, setDailyTasks] = useState<any[]>([]);
     const [analyzing, setAnalyzing] = useState(false);
 
@@ -216,7 +217,13 @@ export default function InsightsScreen() {
         try {
             const rawMoods = currentData.mood_trend || [];
             const rawEmotions = currentData.category_distribution ? Object.keys(currentData.category_distribution) : [];
-            const payload = { mood_trend: rawMoods, top_emotions: rawEmotions };
+            
+            // 🔌 PRE-INSTALACIÓN: Enviamos el idioma al servidor
+            const payload = { 
+                mood_trend: rawMoods, 
+                top_emotions: rawEmotions,
+                language: language 
+            };
 
             const res = await apiFetch('/insights/analyze', {
                 method: 'POST',
@@ -226,15 +233,15 @@ export default function InsightsScreen() {
 
             const responseData = await res.json();
             if (res.ok) {
-                // ✅ MODIFICACIÓN 1: Frase de cierre de Alice
-                const closingPhrase = "\n\nHe dejado 3 protocolos aquí debajo que creo que pueden ayudarte a navegar esto. Revísalos con calma.";
+                // 🌍 Usamos las traducciones dinámicas para las partes fijas
+                const closingPhrase = t('insights.tasks.closing_phrase');
                 const fullText = `${responseData.story || ''}\n\n${responseData.analysis_text || ''}${closingPhrase}`.trim();
                 
                 const newStory = {
                     story: responseData.story, 
                     full_text: fullText, 
                     core_pattern: responseData.core_pattern || "Finding your rhythm.",
-                    archetype: responseData.archetype || { name: "The Observer", description: "Watching before acting." }
+                    archetype: responseData.archetype || { name: t('insights.hero.awaiting'), description: "" }
                 };
                 
                 setAliceStory(newStory);
@@ -246,43 +253,40 @@ export default function InsightsScreen() {
 
                 if (responseData.audio) playAudioData(responseData.audio);
 
-                // ✅ MODIFICACIÓN 2: Procesamiento de Tareas (Force 3 + Help Text + Route)
+                // 🌍 Procesamiento de Tareas usando el idioma actual
                 let rawTasks = responseData.tasks && Array.isArray(responseData.tasks) ? responseData.tasks : [];
                 const timestamp = Date.now();
+                const helpText = t('insights.tasks.help_text');
                 
-                // Procesamos las tareas que vienen del servidor
-                let newTasks = rawTasks.map((t: any, i: number) => {
-                    const isString = typeof t === 'string';
-                    const originalDesc = isString ? t : (t.description || "No details provided.");
+                let newTasks = rawTasks.map((t_item: any, i: number) => {
+                    const isString = typeof t_item === 'string';
+                    const originalDesc = isString ? t_item : (t_item.description || "No details provided.");
                     
                     return {
                         id: `task_${timestamp}_${i}`,
-                        title: isString ? "Mindful Action" : (t.title || "Task"),
-                        time: isString ? "Today" : (t.time || "5 min"),
-                        // Añadimos el texto de ayuda
-                        description: `${originalDesc}\n\n(Si no sabes cómo hacerlo, pulsa el botón y pregúntame en el Nexus.)`,
-                        // Forzamos la ruta al Nexus
+                        title: isString ? t('insights.tasks.default_title') : (t_item.title || "Task"),
+                        time: isString ? t('insights.tasks.default_time') : (t_item.time || "5 min"),
+                        description: `${originalDesc}\n\n${helpText}`,
                         route: "/", 
                         completed: false,
                         expanded: false
                     };
                 });
 
-                // ✅ MODIFICACIÓN 3: Asegurar siempre 3 tareas
+                // 🌍 Tareas de respaldo traducidas
                 while (newTasks.length < 3) {
                     const extraIndex = newTasks.length + 1;
                     newTasks.push({
                         id: `task_backup_${timestamp}_${extraIndex}`,
-                        title: "Deep Check-in",
-                        time: "5 min",
-                        description: "Parece que necesitamos profundizar más. Ve al Nexus y cuéntame qué sientes en este momento.\n\n(Si no sabes cómo hacerlo, pulsa el botón y pregúntame en el Nexus.)",
+                        title: t('insights.tasks.backup_title'),
+                        time: t('insights.tasks.backup_time'),
+                        description: `${t('insights.tasks.backup_desc')}\n\n${helpText}`,
                         route: "/",
                         completed: false,
                         expanded: false
                     });
                 }
                 
-                // Si por alguna razón el servidor manda más de 3, cortamos (opcional, pero mantiene el diseño limpio)
                 if (newTasks.length > 3) newTasks = newTasks.slice(0, 3);
 
                 setDailyTasks(newTasks);
@@ -309,11 +313,7 @@ export default function InsightsScreen() {
     const navigateToTask = async (route: string, taskId: string) => {
         handleToggleTask(taskId);
         const today = new Date().toDateString();
-        
-        // Siempre guardamos interacción de chat ya que vamos al Nexus
         await AsyncStorage.setItem('last_chat_interaction', today);
-        
-        // Redirección forzada al Nexus ('/') como pidió el Arquitecto
         setTimeout(() => {
             router.replace('/'); 
         }, 800);
@@ -326,7 +326,7 @@ export default function InsightsScreen() {
         };
         load();
         return () => { stopAudio(); };
-    }, []));
+    }, [t])); // Recargar si cambia el idioma
 
     const handleManualAnalyze = async () => {
         if (data) {
@@ -352,8 +352,8 @@ export default function InsightsScreen() {
     return (
         <View style={styles.container}>
             <View style={styles.header}>
-                <Text style={styles.headerTitle}>INSIGHTS</Text>
-                <Text style={styles.headerSubtitle}>INTERNAL COMPASS</Text>
+                <Text style={styles.headerTitle}>{t('insights.title')}</Text>
+                <Text style={styles.headerSubtitle}>{t('insights.subtitle')}</Text>
             </View>
 
             <ScrollView
@@ -369,24 +369,24 @@ export default function InsightsScreen() {
                             <LinearGradient colors={['rgba(34, 211, 238, 0.05)', 'transparent']} style={StyleSheet.absoluteFill} />
                             <View style={styles.archetypeHeader}>
                                 <View>
-                                    <Text style={styles.storyLabel}>CURRENT ARCHETYPE</Text>
-                                    <Text style={styles.archetypeTitle}>{aliceStory?.archetype?.name || "Awaiting Data..."}</Text>
+                                    <Text style={styles.storyLabel}>{t('insights.hero.archetype_label')}</Text>
+                                    <Text style={styles.archetypeTitle}>{aliceStory?.archetype?.name || t('insights.hero.awaiting')}</Text>
                                 </View>
                                 <View style={styles.iconBox}>
                                     <Ionicons name="finger-print-outline" size={24} color={THEME.cyan} />
                                 </View>
                             </View>
                             <View style={styles.divider} />
-                            {aliceStory?.core_pattern && <Text style={styles.patternText}>/// PATTERN: {aliceStory.core_pattern.toUpperCase()}</Text>}
+                            {aliceStory?.core_pattern && <Text style={styles.patternText}>/// {t('insights.hero.pattern_prefix')}{aliceStory.core_pattern.toUpperCase()}</Text>}
                             
                             {analyzing ? (
                                 <View style={{flexDirection:'row', alignItems:'center', gap:10, paddingVertical: 20}}>
                                     <ActivityIndicator color={THEME.cyan} size="small" />
-                                    <Text style={styles.analyzingText}>Synchronizing...</Text>
+                                    <Text style={styles.analyzingText}>{t('insights.hero.analyzing')}</Text>
                                 </View>
                             ) : (
                                 <View style={{marginTop: 10}}>
-                                    <ExpandableAliceText text={aliceMessage} />
+                                    <ExpandableAliceText text={aliceMessage} t={t} />
                                 </View>
                             )}
                             
@@ -397,7 +397,7 @@ export default function InsightsScreen() {
                             >
                                 <Ionicons name={isPlaying ? "pause" : "play"} size={12} color={isPlaying ? THEME.cyan : THEME.text} />
                                 <Text style={[styles.analyzeBtnText, isPlaying && {color: THEME.cyan}]}>
-                                    {analyzing ? "CALCULATING..." : isPlaying ? "STOP AUDIO" : "INITIATE ANALYSIS"}
+                                    {analyzing ? t('insights.hero.btn_calculating') : isPlaying ? t('insights.hero.btn_stop') : t('insights.hero.btn_initiate')}
                                 </Text>
                             </TouchableOpacity>
                         </View>
@@ -405,7 +405,7 @@ export default function InsightsScreen() {
                         {/* Mood Chart */}
                         <View style={[styles.sectionHeader]}>
                             <Ionicons name="pulse" size={14} color={THEME.subtext} />
-                            <Text style={styles.sectionTitle}>NERVOUS SYSTEM RHYTHM</Text>
+                            <Text style={styles.sectionTitle}>{t('insights.sections.mood_rhythm')}</Text>
                         </View>
                         <View style={styles.chartContainer}>
                             {data.mood_trend && data.mood_trend.length > 1 ? (
@@ -415,13 +415,13 @@ export default function InsightsScreen() {
                                     yAxisLabel="" yAxisSuffix="" chartConfig={chartConfig} bezier
                                     style={styles.chart} withInnerLines={true} withOuterLines={false} withVerticalLines={false} withHorizontalLabels={false}
                                 />
-                            ) : (<Text style={styles.emptyText}>Insufficient data points.</Text>)}
+                            ) : (<Text style={styles.emptyText}>{t('insights.empty.data')}</Text>)}
                         </View>
 
                         {/* Emotional Spectrum */}
                         <View style={[styles.sectionHeader, {marginTop: 20}]}>
                             <Ionicons name="prism" size={14} color={THEME.subtext} />
-                            <Text style={styles.sectionTitle}>EMOTIONAL SPECTRUM</Text>
+                            <Text style={styles.sectionTitle}>{t('insights.sections.spectrum')}</Text>
                         </View>
                         <View style={styles.spectrumContainer}>
                             {data.category_distribution ? (
@@ -430,13 +430,13 @@ export default function InsightsScreen() {
                                         <HorizontalBar key={i} label={label} value={value as number} maxValue={5} color={THEME.amber} />
                                     ))}
                                 </View>
-                            ) : (<Text style={styles.emptyText}>No spectrum data.</Text>)}
+                            ) : (<Text style={styles.emptyText}>{t('insights.empty.spectrum')}</Text>)}
                         </View>
 
                         {/* Tasks */}
                         <View style={[styles.sectionHeader, {marginTop: 20}]}>
                             <Ionicons name="git-network" size={14} color={THEME.subtext} />
-                            <Text style={styles.sectionTitle}>ALIGNMENT PROTOCOLS</Text>
+                            <Text style={styles.sectionTitle}>{t('insights.sections.protocols')}</Text>
                         </View>
                         <View style={styles.tasksContainer}>
                             {dailyTasks.length > 0 ? dailyTasks.map((task, index) => (
@@ -458,20 +458,34 @@ export default function InsightsScreen() {
                                             <Text style={styles.taskDesc}>{task.description}</Text>
                                             {!task.completed && (
                                                 <TouchableOpacity style={styles.actionButton} onPress={() => navigateToTask(task.route, task.id)}>
-                                                    <Text style={styles.actionButtonText}>EXECUTE PROTOCOL</Text>
+                                                    <Text style={styles.actionButtonText}>{t('insights.tasks.execute')}</Text>
                                                     <Ionicons name="arrow-forward" size={10} color={THEME.cyan} />
                                                 </TouchableOpacity>
                                             )}
                                         </View>
                                     )}
                                 </View>
-                            )) : (<Text style={styles.emptyText}>Protocols inactive. Awaiting Alice.</Text>)}
+                            )) : (<Text style={styles.emptyText}>{t('insights.empty.protocols')}</Text>)}
                         </View>
                     </>
                 )}
                 <View style={{height: 100}} />
             </ScrollView>
             <ConfettiCannon count={150} origin={{x: -10, y: 0}} autoStart={false} ref={confettiRef} fadeOut={true} fallSpeed={3500} zIndex={1000} />
+
+            {/* ✅ [NUEVO] Guía de Iniciación para el INSIGHTS */}
+            <InitiationOverlay 
+              screenName="insights" 
+              steps={language === 'es' ? [
+                { icon: "analytics-outline", title: "El Espejo de Datos", desc: "Esto no son matemáticas. Es un reflejo de tu alma basado en lo que has hablado con Alice." },
+                { icon: "pulse-outline", title: "Frecuencia Vital", desc: "El gráfico muestra tu ritmo emocional. Detecta si estás en expansión o si necesitas refugio." },
+                { icon: "list-outline", title: "Misiones Diarias", desc: "Al pulsar 'INICIAR ANÁLISIS', Alice creará 3 tareas personalizadas para tu día. Cúmplelas para evolucionar." }
+              ] : [
+                { icon: "analytics-outline", title: "Data Mirror", desc: "This isn't math. It's a reflection of your soul based on your conversations with Alice." },
+                { icon: "pulse-outline", title: "Vital Frequency", desc: "The chart shows your emotional rhythm. It detects if you are expanding or need refuge." },
+                { icon: "list-outline", title: "Daily Missions", desc: "Pressing 'INITIATE ANALYSIS' generates 3 custom tasks for your day. Complete them to evolve." }
+              ]} 
+            />
         </View>
     );
 }

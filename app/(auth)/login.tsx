@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ActivityIndicator, StyleSheet, KeyboardAvoidingView, Platform, Image } from 'react-native';
 import { useRouter, Link } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
 import { StatusBar } from 'expo-status-bar';
+import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
 import { API_URL } from '../../utils/api';
 // ✅ IMPORTAMOS EL SISTEMA DE ALERTAS
 import { useAlert } from '../../src/context/AlertContext';
@@ -18,7 +19,80 @@ export default function LoginScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
 
+  // 🔑 CONFIGURACIÓN DE GOOGLE (SOLO UNA VEZ AL MONTAR)
+  useEffect(() => {
+    GoogleSignin.configure({
+      webClientId: '405439242898-9pi71e0nfge6nagoa6usn59nscpvndui.apps.googleusercontent.com', // ✅ TU CLIENT ID TIPO 3
+      offlineAccess: true,
+    });
+  }, []);
+
+  // 🌍 MANEJO DE RESPUESTA DEL BACKEND (COMÚN PARA EMAIL Y GOOGLE)
+  const handleAuthResponse = async (data: any) => {
+    if (data.access_token) {
+      if (Platform.OS === 'web') {
+        localStorage.setItem('user_token', data.access_token);
+      } else {
+        await SecureStore.setItemAsync('user_token', data.access_token);
+      }
+
+      if (data.onboarding_completed === false) {
+        router.replace('/onboarding');
+      } else {
+        router.replace('/(tabs)');
+      }
+    } else {
+      throw new Error('No access token received');
+    }
+  };
+
+  // 🤖 LOGIN CON GOOGLE
+  const handleGoogleLogin = async () => {
+    setGoogleLoading(true);
+    try {
+      await GoogleSignin.hasPlayServices();
+      const userInfo = await GoogleSignin.signIn();
+      
+      // Enviamos el ID TOKEN al backend para que verifique con Google
+      const idToken = userInfo.data?.idToken;
+      if (!idToken) throw new Error('No ID Token from Google');
+
+      const response = await fetch(`${API_URL}/auth/google`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        body: JSON.stringify({ token: idToken }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.detail || 'Google Auth Failed');
+      }
+
+      await handleAuthResponse(data);
+
+    } catch (error: any) {
+      if (error.code === statusCodes.SIGN_IN_CANCELLED) {
+        // Usuario canceló, no hacemos nada
+      } else if (error.code === statusCodes.IN_PROGRESS) {
+        showAlert('WAIT', 'Sign in is already in progress.', 'info');
+      } else if (error.code === statusCodes.PLAY_SERVICES_NOT_AVAILABLE) {
+        showAlert('ERROR', 'Google Play Services not available.', 'error');
+      } else {
+        console.error(error);
+        showAlert('GOOGLE ERROR', 'Could not sign in with Google.', 'error');
+      }
+    } finally {
+      setGoogleLoading(false);
+    }
+  };
+
+  // 📧 LOGIN CON EMAIL (LEGACY)
   const handleLogin = async () => {
     if (!email.trim() || !password.trim()) {
       showAlert('MISSING DATA', 'Please fill in all fields.', 'warning');
@@ -67,20 +141,8 @@ export default function LoginScreen() {
         return;
       }
 
-      // --- ÉXITO ---
-      if (data.access_token) {
-        if (Platform.OS === 'web') {
-          localStorage.setItem('user_token', data.access_token);
-        } else {
-          await SecureStore.setItemAsync('user_token', data.access_token);
-        }
+      await handleAuthResponse(data);
 
-        if (data.onboarding_completed === false) {
-          router.replace('/onboarding');
-        } else {
-          router.replace('/(tabs)');
-        }
-      }
     } catch (error: any) {
       showAlert('CONNECTION LOST', 'Could not reach Nexus. Check internet.', 'error');
     } finally {
@@ -105,6 +167,30 @@ export default function LoginScreen() {
         </View>
 
         <View style={styles.form}>
+          
+          {/* BOTÓN GOOGLE */}
+          <TouchableOpacity 
+            onPress={handleGoogleLogin} 
+            disabled={googleLoading || loading} 
+            style={styles.googleButton}
+          >
+            {googleLoading ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <View style={{flexDirection: 'row', alignItems: 'center', gap: 10}}>
+                {/* Icono G simple usando texto para no cargar assets extra, o puedes usar un Image si tienes el icono */}
+                <Text style={{color: '#fff', fontSize: 18, fontWeight: 'bold'}}>G</Text> 
+                <Text style={styles.googleButtonText}>Continue with Google</Text>
+              </View>
+            )}
+          </TouchableOpacity>
+
+          <View style={styles.divider}>
+            <View style={styles.line} />
+            <Text style={styles.orText}>OR EMAIL</Text>
+            <View style={styles.line} />
+          </View>
+
           <Text style={styles.label}>Username or Email</Text>
           <TextInput
             value={email}
@@ -159,6 +245,39 @@ const styles = StyleSheet.create({
   input: { backgroundColor: '#111', color: '#fff', padding: 18, borderRadius: 12, borderWidth: 1, borderColor: '#222', fontSize: 16, marginBottom: 20 },
   button: { backgroundColor: '#10B981', padding: 20, borderRadius: 12, alignItems: 'center' },
   buttonText: { color: '#000', fontWeight: '900', fontSize: 16, letterSpacing: 1 },
+  
+  // ESTILOS GOOGLE
+  googleButton: {
+    backgroundColor: '#1A1A1A',
+    padding: 18,
+    borderRadius: 12,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#333',
+    marginBottom: 25,
+  },
+  googleButtonText: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
+  divider: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 25,
+  },
+  line: {
+    flex: 1,
+    height: 1,
+    backgroundColor: '#222',
+  },
+  orText: {
+    color: '#444',
+    marginHorizontal: 10,
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+
   footer: { marginTop: 40, flexDirection: 'row', justifyContent: 'center', gap: 8 },
   linkText: { color: '#10B981', fontWeight: 'bold' },
 });

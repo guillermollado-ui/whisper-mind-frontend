@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "405439242898",
+    "project_id": "whisper-mind-7f2c8",
+    "storage_bucket": "whisper-mind-7f2c8.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:405439242898:android:70e0bd9ea66c7773957c4b",
+        "android_client_info": {
+          "package_name": "com.whispermind.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "405439242898-3pfhfpl8boa4h917u7r8b9g6atkoe3la.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.whispermind.app",
+            "certificate_hash": "02099b2bb678b985cecd668596c40a39f0601138"
+          }
+        },
+        {
+          "client_id": "405439242898-9pi71e0nfge6nagoa6usn59nscpvndui.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAYxjwxglDIIlucLtZpWSnWmoOrMoE36ks"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "405439242898-9pi71e0nfge6nagoa6usn59nscpvndui.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

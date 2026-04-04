@@ -2,11 +2,11 @@
  * (auth)/register.tsx — WHISPERIZED
  * * Fixes:
  * 1. Integrated AlertContext (Black/Neon Alerts).
- * 2. Removed legacy Modal code.
+ * 2. Integrated Google Sign-In with Disclaimer Check.
  * 3. Auto-redirect to login on success.
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
     View,
     Text,
@@ -20,19 +20,14 @@ import {
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
+import * as SecureStore from 'expo-secure-store';
 import { API_URL } from '../../utils/api';
 // ✅ IMPORTAMOS EL SISTEMA DE ALERTAS
 import { useAlert } from '../../src/context/AlertContext';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-/**
- * Validate password against the corrected backend's rules:
- * - At least 8 characters
- * - At least one uppercase letter
- * - At least one lowercase letter
- * - At least one digit
- */
 const validatePassword = (password: string): string | null => {
     if (password.length < 8) return 'Password must be at least 8 characters.';
     if (!/[A-Z]/.test(password)) return 'Password must contain an uppercase letter.';
@@ -51,7 +46,73 @@ export default function RegisterScreen() {
     const [password, setPassword] = useState('');
     const [disclaimerAccepted, setDisclaimerAccepted] = useState(false);
     const [loading, setLoading] = useState(false);
+    const [googleLoading, setGoogleLoading] = useState(false);
     const [showPassword, setShowPassword] = useState(false);
+
+    // 🔑 CONFIGURACIÓN GOOGLE (Solo una vez)
+    useEffect(() => {
+        GoogleSignin.configure({
+            webClientId: '405439242898-9pi71e0nfge6nagoa6usn59nscpvndui.apps.googleusercontent.com', // ✅ TU CLIENT ID TIPO 3
+            offlineAccess: true,
+        });
+    }, []);
+
+    // 🤖 REGISTRO CON GOOGLE
+    const handleGoogleRegister = async () => {
+        if (!disclaimerAccepted) {
+            showAlert('PROTOCOL HALTED', 'You must accept the Medical Disclaimer before using Google Sign-In.', 'warning');
+            return;
+        }
+
+        setGoogleLoading(true);
+        try {
+            await GoogleSignin.hasPlayServices();
+            const userInfo = await GoogleSignin.signIn();
+            const idToken = userInfo.data?.idToken;
+
+            if (!idToken) throw new Error('No ID Token from Google');
+
+            // Enviamos el token al endpoint unificado /auth/google
+            const response = await fetch(`${API_URL}/auth/google`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json'
+                },
+                body: JSON.stringify({ token: idToken }),
+            });
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(data.detail || 'Google Registration Failed');
+            }
+
+            // Guardamos token
+            if (Platform.OS === 'web') {
+                localStorage.setItem('user_token', data.access_token);
+            } else {
+                await SecureStore.setItemAsync('user_token', data.access_token);
+            }
+
+            // Redirigir según estado
+            if (data.onboarding_completed === false) {
+                router.replace('/onboarding');
+            } else {
+                router.replace('/(tabs)');
+            }
+
+        } catch (error: any) {
+            if (error.code === statusCodes.SIGN_IN_CANCELLED) {
+                // Cancelado por usuario
+            } else {
+                console.error(error);
+                showAlert('GOOGLE ERROR', 'Could not register with Google.', 'error');
+            }
+        } finally {
+            setGoogleLoading(false);
+        }
+    };
 
     const handleRegister = async () => {
         // --- CLIENT-SIDE VALIDATION ---
@@ -143,6 +204,29 @@ export default function RegisterScreen() {
                 </View>
 
                 <View style={styles.formContainer}>
+                    
+                    {/* BOTÓN GOOGLE */}
+                    <TouchableOpacity 
+                        onPress={handleGoogleRegister} 
+                        disabled={googleLoading || loading} 
+                        style={[styles.googleButton, !disclaimerAccepted && {opacity: 0.5}]}
+                    >
+                        {googleLoading ? (
+                            <ActivityIndicator color="#fff" />
+                        ) : (
+                            <View style={{flexDirection: 'row', alignItems: 'center', gap: 10}}>
+                                <Text style={{color: '#fff', fontSize: 18, fontWeight: 'bold'}}>G</Text> 
+                                <Text style={styles.googleButtonText}>Join with Google</Text>
+                            </View>
+                        )}
+                    </TouchableOpacity>
+
+                    <View style={styles.divider}>
+                        <View style={styles.line} />
+                        <Text style={styles.orText}>OR MANUAL ENTRY</Text>
+                        <View style={styles.line} />
+                    </View>
+
                     <View style={styles.inputWrapper}>
                         <Ionicons name="person-outline" size={20} color="#64748B" style={styles.inputIcon} />
                         <TextInput style={styles.input} placeholder="Username" placeholderTextColor="#64748B" value={username} onChangeText={setUsername} autoCapitalize="none" />
@@ -196,4 +280,37 @@ const styles = StyleSheet.create({
     disclaimerText: { color: '#94A3B8', fontSize: 12, flex: 1 },
     registerBtn: { backgroundColor: '#10B981', borderRadius: 12, height: 55, justifyContent: 'center', alignItems: 'center', marginBottom: 15 },
     registerBtnText: { color: '#000', fontSize: 16, fontWeight: 'bold', letterSpacing: 1 },
+
+    // ESTILOS GOOGLE
+    googleButton: {
+        backgroundColor: '#1A1A1A',
+        padding: 15,
+        borderRadius: 12,
+        alignItems: 'center',
+        borderWidth: 1,
+        borderColor: '#333',
+        marginBottom: 20,
+    },
+    googleButtonText: {
+        color: '#fff',
+        fontWeight: 'bold',
+        fontSize: 16,
+    },
+    divider: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginBottom: 20,
+    },
+    line: {
+        flex: 1,
+        height: 1,
+        backgroundColor: '#334155',
+    },
+    orText: {
+        color: '#64748B',
+        marginHorizontal: 10,
+        fontSize: 10,
+        fontWeight: 'bold',
+        letterSpacing: 1
+    },
 });
