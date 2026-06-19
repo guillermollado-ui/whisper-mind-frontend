@@ -1,6 +1,6 @@
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { View, Platform, LogBox } from 'react-native';
+import { View, Platform, LogBox, StyleSheet } from 'react-native'; // ✅ Añadido StyleSheet
 import { useEffect, useState } from 'react';
 import * as SecureStore from 'expo-secure-store';
 import { ThemeProvider, DarkTheme } from '@react-navigation/native';
@@ -101,29 +101,32 @@ export default function RootLayout() {
       <LanguageProvider>
         <AlertProvider>
           <ThemeProvider value={WhisperTheme}>
-            <View style={{ flex: 1, backgroundColor: '#000000' }}>
-              <StatusBar style="light" />
-              
-              <Stack screenOptions={{ 
-                headerShown: false,
-                contentStyle: { backgroundColor: '#000000' }, 
-                animation: 'fade',
-              }}>
+            {/* ✅ EL CONTENEDOR MAESTRO (CHASIS WEB) */}
+            <View style={styles.masterBackground}>
+              <View style={styles.appContainer}>
+                <StatusBar style="light" />
                 
-                <Stack.Screen name="index" />
-                <Stack.Screen name="(auth)" options={{ animation: 'none' }} />
-                <Stack.Screen name="(tabs)" options={{ animation: 'fade' }} />
-                <Stack.Screen name="onboarding" />
-                
-                <Stack.Screen 
-                  name="subscription" 
-                  options={{ 
-                    presentation: 'modal',
-                    animation: 'slide_from_bottom',
-                    headerShown: false 
-                  }} 
-                />
-              </Stack>
+                <Stack screenOptions={{ 
+                  headerShown: false,
+                  contentStyle: { backgroundColor: '#000000' }, 
+                  animation: 'fade',
+                }}>
+                  
+                  <Stack.Screen name="index" />
+                  <Stack.Screen name="(auth)" options={{ animation: 'none' }} />
+                  <Stack.Screen name="(tabs)" options={{ animation: 'fade' }} />
+                  <Stack.Screen name="onboarding" />
+                  
+                  <Stack.Screen 
+                    name="subscription" 
+                    options={{ 
+                      presentation: 'modal',
+                      animation: 'slide_from_bottom',
+                      headerShown: false 
+                    }} 
+                  />
+                </Stack>
+              </View>
             </View>
           </ThemeProvider>
         </AlertProvider>
@@ -131,3 +134,28 @@ export default function RootLayout() {
     </GodModeProvider>
   );
 }
+
+// ✅ ESTILOS DEL CONTENEDOR MAESTRO
+const styles = StyleSheet.create({
+  masterBackground: {
+    flex: 1,
+    // En PC mostramos un gris súper oscuro de fondo para que contraste, en móvil es negro total
+    backgroundColor: Platform.OS === 'web' ? '#050505' : '#000000', 
+    alignItems: Platform.OS === 'web' ? 'center' : 'stretch',
+    justifyContent: 'center',
+  },
+  appContainer: {
+    flex: 1,
+    width: '100%',
+    // El toque mágico: En móvil ocupa el 100%, en web máximo 480px
+    maxWidth: Platform.OS === 'web' ? 480 : '100%', 
+    backgroundColor: '#000000',
+    overflow: 'hidden',
+    ...(Platform.OS === 'web' && {
+      borderLeftWidth: 1,
+      borderRightWidth: 1,
+      borderColor: '#1e293b', // Borde elegante tipo cristal
+      boxShadow: '0px 0px 30px rgba(0,0,0,0.5)', // Sombra para que flote
+    })
+  }
+});

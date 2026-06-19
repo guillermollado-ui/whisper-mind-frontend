@@ -1,6 +1,7 @@
 import React, { createContext, useState, useContext, useEffect } from 'react';
 import * as SecureStore from 'expo-secure-store';
-import * as Localization from 'expo-localization'; // 👈 Ahora ya funciona perfectamente
+import * as Localization from 'expo-localization'; 
+import { Platform } from 'react-native'; // 👈 Importamos Platform para detectar la web
 import { translations } from '../../utils/translations'; 
 
 type Language = 'en' | 'es';
@@ -23,16 +24,23 @@ export const LanguageProvider = ({ children }: { children: React.ReactNode }) =>
   const loadLanguagePreference = async () => {
     try {
       // 1. ¿El usuario ya eligió un idioma manualmente antes?
-      const savedLang = await SecureStore.getItemAsync('user_language');
+      let savedLang: string | null = null;
+
+      if (Platform.OS === 'web') {
+        // En web usamos el localStorage estándar
+        savedLang = localStorage.getItem('user_language');
+      } else {
+        // En móvil seguimos usando el SecureStore cifrado
+        savedLang = await SecureStore.getItemAsync('user_language');
+      }
       
       if (savedLang === 'es' || savedLang === 'en') {
         setLanguageState(savedLang as Language);
       } else {
-        // 2. Si es la primera vez, detectamos el idioma del móvil
+        // 2. Si es la primera vez, detectamos el idioma del sistema
         const locales = Localization.getLocales();
         const deviceLanguage = locales[0]?.languageCode;
         
-        // Si el idioma empieza por 'es' (es, es-ES, es-MX...), ponemos español
         if (deviceLanguage?.startsWith('es')) {
           setLanguageState('es');
         } else {
@@ -47,7 +55,12 @@ export const LanguageProvider = ({ children }: { children: React.ReactNode }) =>
 
   const setLanguage = async (lang: Language) => {
     setLanguageState(lang);
-    await SecureStore.setItemAsync('user_language', lang);
+    
+    if (Platform.OS === 'web') {
+      localStorage.setItem('user_language', lang);
+    } else {
+      await SecureStore.setItemAsync('user_language', lang);
+    }
   };
 
   const t = (path: string) => {
@@ -56,7 +69,6 @@ export const LanguageProvider = ({ children }: { children: React.ReactNode }) =>
     
     for (const key of keys) {
       if (!current || current[key] === undefined) {
-        // Si no encuentra la traducción, intenta buscarla en inglés por lo menos
         let fallback: any = translations['en'];
         for (const fKey of keys) {
             if (!fallback || fallback[fKey] === undefined) return path;

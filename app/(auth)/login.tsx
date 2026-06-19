@@ -4,12 +4,22 @@ import { useRouter, Link } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
 import { StatusBar } from 'expo-status-bar';
 import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
+// ✅ IMPORTAMOS EL MOTOR WEB DE GOOGLE
+import * as WebBrowser from 'expo-web-browser';
+import * as Google from 'expo-auth-session/providers/google';
+
 import { API_URL } from '../../utils/api';
 // ✅ IMPORTAMOS EL SISTEMA DE ALERTAS
 import { useAlert } from '../../src/context/AlertContext';
 
 // 📂 Cargar la imagen del logo
 const LOGO_IMAGE = require('@/assets/icon.png'); 
+
+// 🌐 Le decimos al navegador que puede abrir ventanas emergentes para autenticarse
+WebBrowser.maybeCompleteAuthSession();
+
+// 🔑 CLIENT ID ACTUALIZADO (GENERADO MANUALMENTE EN GOOGLE CLOUD)
+const WEB_CLIENT_ID = '966157018634-o6t4dk13db3b0ordjfk7fgdmsb013gr0.apps.googleusercontent.com'; // El ID de Tipo 3 (Aplicación Web)
 
 export default function LoginScreen() {
   const router = useRouter();
@@ -21,21 +31,43 @@ export default function LoginScreen() {
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
 
-  // 🔑 CONFIGURACIÓN DE GOOGLE (SOLO UNA VEZ AL MONTAR)
+  // 🌐 PREPARAMOS EL MOTOR DE GOOGLE PARA LA WEB
+  const [request, response, promptAsync] = Google.useIdTokenAuthRequest({
+    clientId: WEB_CLIENT_ID,
+  });
+
+  // 📱 CONFIGURACIÓN DE GOOGLE (SOLO EN MÓVIL PARA EVITAR CRASH)
   useEffect(() => {
-    GoogleSignin.configure({
-      webClientId: '405439242898-9pi71e0nfge6nagoa6usn59nscpvndui.apps.googleusercontent.com', // ✅ TU CLIENT ID TIPO 3
-      offlineAccess: true,
-    });
+    if (Platform.OS !== 'web') {
+      GoogleSignin.configure({
+        webClientId: WEB_CLIENT_ID, 
+        offlineAccess: true,
+      });
+    }
   }, []);
+
+  // 🌐 ESCUCHADOR DEL RESULTADO DE GOOGLE WEB
+  useEffect(() => {
+    if (response?.type === 'success') {
+      const { id_token } = response.params;
+      if (id_token) {
+        sendGoogleTokenToBackend(id_token);
+      }
+    } else if (response?.type === 'error') {
+       setGoogleLoading(false);
+       showAlert('GOOGLE ERROR', 'Authentication cancelled or failed.', 'error');
+    }
+  }, [response]);
 
   // 🌍 MANEJO DE RESPUESTA DEL BACKEND (COMÚN PARA EMAIL Y GOOGLE)
   const handleAuthResponse = async (data: any) => {
     if (data.access_token) {
       if (Platform.OS === 'web') {
         localStorage.setItem('user_token', data.access_token);
+        if (data.user && data.user.id) localStorage.setItem('user_id', data.user.id.toString());
       } else {
         await SecureStore.setItemAsync('user_token', data.access_token);
+        if (data.user && data.user.id) await SecureStore.setItemAsync('user_id', data.user.id.toString());
       }
 
       if (data.onboarding_completed === false) {
@@ -48,18 +80,10 @@ export default function LoginScreen() {
     }
   };
 
-  // 🤖 LOGIN CON GOOGLE
-  const handleGoogleLogin = async () => {
-    setGoogleLoading(true);
+  // 🧠 FUNCIÓN CENTRALIZADA PARA ENVIAR EL TOKEN AL BACKEND
+  const sendGoogleTokenToBackend = async (idToken: string) => {
     try {
-      await GoogleSignin.hasPlayServices();
-      const userInfo = await GoogleSignin.signIn();
-      
-      // Enviamos el ID TOKEN al backend para que verifique con Google
-      const idToken = userInfo.data?.idToken;
-      if (!idToken) throw new Error('No ID Token from Google');
-
-      const response = await fetch(`${API_URL}/auth/google`, {
+      const backendResponse = await fetch(`${API_URL}/auth/google`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -68,15 +92,43 @@ export default function LoginScreen() {
         body: JSON.stringify({ token: idToken }),
       });
 
-      const data = await response.json();
+      const data = await backendResponse.json();
 
-      if (!response.ok) {
+      if (!backendResponse.ok) {
         throw new Error(data.detail || 'Google Auth Failed');
       }
 
       await handleAuthResponse(data);
+    } catch (error: any) {
+      console.error("Backend Error:", error);
+      showAlert('AUTH ERROR', error.message || 'Could not verify with Nexus.', 'error');
+    } finally {
+      setGoogleLoading(false);
+    }
+  };
+
+  // 🤖 LOGIN CON GOOGLE (BOTÓN UNIFICADO)
+  const handleGoogleLogin = async () => {
+    setGoogleLoading(true);
+
+    // 🌐 RUTA WEB
+    if (Platform.OS === 'web') {
+      promptAsync(); // Esto abre el popup de Google en Chrome/Safari
+      return;
+    }
+
+    // 📱 RUTA MÓVIL
+    try {
+      await GoogleSignin.hasPlayServices();
+      const userInfo = await GoogleSignin.signIn();
+      
+      const idToken = userInfo.data?.idToken || userInfo.idToken; // Compatibilidad entre versiones
+      if (!idToken) throw new Error('No ID Token from Google');
+
+      await sendGoogleTokenToBackend(idToken);
 
     } catch (error: any) {
+      setGoogleLoading(false);
       if (error.code === statusCodes.SIGN_IN_CANCELLED) {
         // Usuario canceló, no hacemos nada
       } else if (error.code === statusCodes.IN_PROGRESS) {
@@ -87,8 +139,6 @@ export default function LoginScreen() {
         console.error(error);
         showAlert('GOOGLE ERROR', 'Could not sign in with Google.', 'error');
       }
-    } finally {
-      setGoogleLoading(false);
     }
   };
 
@@ -171,14 +221,13 @@ export default function LoginScreen() {
           {/* BOTÓN GOOGLE */}
           <TouchableOpacity 
             onPress={handleGoogleLogin} 
-            disabled={googleLoading || loading} 
+            disabled={googleLoading || loading || !request && Platform.OS === 'web'} 
             style={styles.googleButton}
           >
             {googleLoading ? (
               <ActivityIndicator color="#fff" />
             ) : (
               <View style={{flexDirection: 'row', alignItems: 'center', gap: 10}}>
-                {/* Icono G simple usando texto para no cargar assets extra, o puedes usar un Image si tienes el icono */}
                 <Text style={{color: '#fff', fontSize: 18, fontWeight: 'bold'}}>G</Text> 
                 <Text style={styles.googleButtonText}>Continue with Google</Text>
               </View>

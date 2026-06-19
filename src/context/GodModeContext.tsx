@@ -1,6 +1,7 @@
 import React, { createContext, useState, useContext, useEffect } from 'react';
 import * as SecureStore from 'expo-secure-store';
 import * as Haptics from 'expo-haptics';
+import { Platform } from 'react-native'; // 👈 Añadimos Platform
 
 type GodModeContextType = {
   isGodMode: boolean;
@@ -20,19 +21,34 @@ export const GodModeProvider = ({ children }: { children: React.ReactNode }) => 
   useEffect(() => {
     const loadGodMode = async () => {
       try {
-        const stored = await SecureStore.getItemAsync('whisper_god_mode');
+        let stored: string | null = null;
+        
+        if (Platform.OS === 'web') {
+          stored = localStorage.getItem('whisper_god_mode');
+        } else {
+          stored = await SecureStore.getItemAsync('whisper_god_mode');
+        }
+
         if (stored === 'true') {
           setIsGodMode(true);
         }
-      } catch (e) {}
+      } catch (e) {
+        console.log("Error cargando God Mode", e);
+      }
     };
     loadGodMode();
   }, []);
 
   const unlockGodMode = async () => {
     setIsGodMode(true);
-    await SecureStore.setItemAsync('whisper_god_mode', 'true');
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    
+    if (Platform.OS === 'web') {
+      localStorage.setItem('whisper_god_mode', 'true');
+      // En web no hay Haptics, así que no lo llamamos para evitar más errores
+    } else {
+      await SecureStore.setItemAsync('whisper_god_mode', 'true');
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    }
   };
 
   return (

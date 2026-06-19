@@ -108,7 +108,9 @@ export default function VaultScreen() {
   const toggleAlarm = async () => {
     const newState = !isAlarmActive;
     setIsAlarmActive(newState);
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    if (Platform.OS !== 'web') {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    }
     try {
       await SecureStore.setItemAsync('whisper_alarm_enabled', newState.toString());
     } catch (e) { console.error(e); }
@@ -208,6 +210,7 @@ export default function VaultScreen() {
       setDisplayLimit(prev => prev + 10);
   };
 
+  // ✅ [CIRUGÍA AVANZADA WEB] Menú compartir nativo y descargas automatizadas
   const handleShareImage = async (url) => {
     try {
       const finalUrl = getImageUrl(url);
@@ -215,6 +218,49 @@ export default function VaultScreen() {
           Alert.alert("Error", t('vault.alerts.no_image'));
           return;
       }
+
+      // 🛡️ TRIPLE RED DE SEGURIDAD PARA LA WEB
+      if (Platform.OS === 'web') {
+        try {
+          // 1. Convertimos la imagen a un archivo (Blob) en la memoria temporal
+          const response = await fetch(finalUrl);
+          const blob = await response.blob();
+          const file = new File([blob], `whisper_memory_${Date.now()}.png`, { type: blob.type || 'image/png' });
+
+          // 2. Intentamos invocar el menú nativo "Compartir" de la Web (Safari, Edge, Chrome Móvil)
+          if (navigator.canShare && navigator.canShare({ files: [file] })) {
+            await navigator.share({
+              files: [file],
+              title: 'Whisper Mind Memory',
+              text: language === 'es' ? 'Mi recuerdo en Whisper Mind' : 'My Whisper Mind memory'
+            });
+          } else {
+            // 3. Si no tiene menú nativo, forzamos descarga automática a la carpeta Descargas
+            const objectUrl = window.URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = objectUrl;
+            link.download = file.name;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            window.URL.revokeObjectURL(objectUrl);
+            Alert.alert(
+              language === 'es' ? "DESCARGADO" : "DOWNLOADED",
+              language === 'es' ? "Imagen guardada en tus descargas." : "Image saved to your downloads."
+            );
+          }
+        } catch (err) {
+          // 4. Si el servidor bloquea la lectura por seguridad, la pestaña nueva es la única salida.
+          window.open(finalUrl, '_blank');
+          Alert.alert(
+            language === 'es' ? "IMAGEN ABIERTA" : "IMAGE OPENED",
+            language === 'es' ? "Haz clic derecho (o mantén pulsado) para guardarla." : "Right-click (or long-press) to save the image."
+          );
+        }
+        return; // Terminamos la ejecución de web
+      }
+
+      // 📱 LÓGICA ORIGINAL PARA MÓVIL
       const filename = FileSystem.cacheDirectory + "whisper_memory.png";
       if (finalUrl.startsWith('data:image')) {
         const base64Data = finalUrl.split('base64,')[1];

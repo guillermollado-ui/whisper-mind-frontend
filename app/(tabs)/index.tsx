@@ -133,7 +133,12 @@ export default function NexusScreen() {
     useCallback(() => {
       let isActive = true;
       const verifySession = async () => {
-        const token = await SecureStore.getItemAsync('user_token');
+        let token = null;
+        if (Platform.OS === 'web') {
+          token = localStorage.getItem('user_token');
+        } else {
+          token = await SecureStore.getItemAsync('user_token');
+        }
         if (!token && isActive) router.replace('/login');
       };
       verifySession();
@@ -143,9 +148,18 @@ export default function NexusScreen() {
 
   useEffect(() => {
     const loadPreferences = async () => {
-      const bio = await SecureStore.getItemAsync('use_biometrics');
+      let bio = null;
+      let savedSpeed = null;
+      
+      if (Platform.OS === 'web') {
+        bio = localStorage.getItem('use_biometrics');
+        savedSpeed = localStorage.getItem('alice_speed');
+      } else {
+        bio = await SecureStore.getItemAsync('use_biometrics');
+        savedSpeed = await SecureStore.getItemAsync('alice_speed');
+      }
+
       setBiometricsEnabled(bio === 'true');
-      const savedSpeed = await SecureStore.getItemAsync('alice_speed');
       if (savedSpeed) setAliceSpeed(parseFloat(savedSpeed));
     };
     loadPreferences();
@@ -153,8 +167,12 @@ export default function NexusScreen() {
 
   const handleSpeedChange = async (newSpeed: number) => {
     setAliceSpeed(newSpeed);
-    await SecureStore.setItemAsync('alice_speed', newSpeed.toString());
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    if (Platform.OS === 'web') {
+      localStorage.setItem('alice_speed', newSpeed.toString());
+    } else {
+      await SecureStore.setItemAsync('alice_speed', newSpeed.toString());
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
   };
 
   useEffect(() => {
@@ -183,7 +201,7 @@ export default function NexusScreen() {
             }
             
             // Le decimos a RevenueCat quién es este usuario basándonos en tu Base de Datos
-            if (userStatus.username) {
+            if (userStatus.username && Platform.OS !== 'web') {
                 await Purchases.logIn(userStatus.username);
             }
         } catch (e) {
@@ -198,6 +216,10 @@ export default function NexusScreen() {
 
   // ✅ NUEVO: Función para Restaurar Compras (Obligatorio en App Stores)
   const handleRestorePurchases = async () => {
+      if (Platform.OS === 'web') {
+         showAlert("WEB PROTOCOL", "Purchases are managed on the mobile app.", "info");
+         return;
+      }
       try {
           const purchaserInfo = await Purchases.restorePurchases();
           // Comprobamos si RevenueCat detecta que tienen la suscripción activa
@@ -213,22 +235,24 @@ export default function NexusScreen() {
 
   useEffect(() => {
     async function checkNotificationPermissions() {
-        if (Device.isDevice) {
+        if (Device.isDevice && Platform.OS !== 'web') {
             const { status } = await Notifications.getPermissionsAsync();
             if (status !== 'granted') await Notifications.requestPermissionsAsync();
         }
     }
     checkNotificationPermissions();
 
-    responseListener.current = Notifications.addNotificationResponseReceivedListener(response => {
-      const data = response.notification.request.content.data;
-      if (data && data.mode) {
-         handleRoutineTrigger(data.mode);
-      }
-    });
+    if (Platform.OS !== 'web') {
+        responseListener.current = Notifications.addNotificationResponseReceivedListener(response => {
+          const data = response.notification.request.content.data;
+          if (data && data.mode) {
+             handleRoutineTrigger(data.mode);
+          }
+        });
+    }
 
     return () => {
-      if (responseListener.current) {
+      if (responseListener.current && Platform.OS !== 'web') {
         responseListener.current.remove();
       }
     };
@@ -277,7 +301,7 @@ export default function NexusScreen() {
     if (tapCount.current >= 5) {
       unlockGodMode();
       tapCount.current = 0;
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } else {
       tapTimeout.current = setTimeout(() => {
         tapCount.current = 0;
@@ -343,7 +367,7 @@ export default function NexusScreen() {
   }, []);
 
   const activateSleepRitual = async () => {
-    await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    if (Platform.OS !== 'web') await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     
     if (aiSpeaking) await stopSpeaking();
     if (isRecording) stopRecordingAction();
@@ -373,7 +397,7 @@ export default function NexusScreen() {
   };
 
   const triggerFlashReset = async () => {
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+    if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
     if (aiSpeaking) await stopSpeaking();
     setAiThinking(true);
     setSilentResponse(null);
@@ -400,10 +424,10 @@ export default function NexusScreen() {
 
   const enterFlashSilence = () => {
       setCurrentFlashState('silence');
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+      if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
       setTimeout(() => {
           setCurrentFlashState('choice');
-          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       }, 15000); 
   };
 
@@ -420,7 +444,7 @@ export default function NexusScreen() {
   const publishToNetwork = async () => {
     if (!proposedVibration) return;
     setIsPublishing(true);
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     try {
       const payload = {
         message: proposedVibration.echo_text || proposedVibration.echo || "Essence",
@@ -460,7 +484,7 @@ export default function NexusScreen() {
       const { recording } = await Audio.Recording.createAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
       setRecording(recording);
       setIsRecording(true);
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     } catch (err) { showAlert("Mic Error", "Check permissions", "error"); }
   }
 
@@ -474,13 +498,13 @@ export default function NexusScreen() {
         setIsRecording(false);
         try { await recording.stopAndUnloadAsync(); } catch (e) {}
         setRecording(null);
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+        if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
         showAlert(language === 'es' ? "MUY CORTO" : "TOO SHORT", language === 'es' ? "Sigue hablando..." : "Keep talking...", "warning");
         return; 
     }
     setIsRecording(false);
     setAiThinking(true);
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     try { if (thinkingSoundRef.current) await thinkingSoundRef.current.playAsync(); } catch (e) {}
     await recording.stopAndUnloadAsync();
     const uri = recording.getURI();
@@ -500,7 +524,7 @@ export default function NexusScreen() {
     if (isRecording) {
         stopRecordingAction();
     } else {
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); 
+        if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); 
         startRecording('journal');
     }
   };
@@ -512,14 +536,27 @@ export default function NexusScreen() {
       formData.append('language', language);
       formData.append('speed', aliceSpeed.toString()); 
 
-      const fileType = uri.split('.').pop();
-      const fileToUpload = {
-        uri: Platform.OS === 'android' ? uri : uri.replace('file://', ''),
-        name: `recording.${fileType}`,
-        type: `audio/${fileType}`,
-      };
-      formData.append('file', fileToUpload as any);
-      const token = await SecureStore.getItemAsync('user_token');
+      if (Platform.OS === 'web') {
+        const response = await fetch(uri);
+        const blob = await response.blob();
+        formData.append('file', blob, 'recording.webm'); 
+      } else {
+        const fileType = uri.split('.').pop() || 'm4a';
+        const fileToUpload = {
+          uri: Platform.OS === 'android' ? uri : uri.replace('file://', ''),
+          name: `recording.${fileType}`,
+          type: `audio/${fileType}`,
+        };
+        formData.append('file', fileToUpload as any);
+      }
+      
+      let token = null;
+      if (Platform.OS === 'web') {
+        token = localStorage.getItem('user_token');
+      } else {
+        token = await SecureStore.getItemAsync('user_token');
+      }
+
       const res = await fetch(`${API_URL}/chat/voice`, {
         method: 'POST',
         headers: {
@@ -528,6 +565,7 @@ export default function NexusScreen() {
         },
         body: formData,
       });
+      
       if (!res.ok) {
         const text = await res.text();
         throw new Error(`Server Error: ${res.status} - ${text.substring(0, 100)}`);
@@ -642,8 +680,13 @@ export default function NexusScreen() {
   const handleLogout = async () => {
     setShowSettingsModal(false);
     if (aiSpeaking) await stopSpeaking();
-    await SecureStore.deleteItemAsync('user_token');
-    if (Platform.OS === 'web') localStorage.removeItem('user_token');
+    
+    if (Platform.OS === 'web') {
+      localStorage.removeItem('user_token');
+    } else {
+      await SecureStore.deleteItemAsync('user_token');
+    }
+    
     router.replace('/login');
   };
 
@@ -663,6 +706,10 @@ export default function NexusScreen() {
 
   const handleBiometricToggle = async (value: boolean) => {
     if (value) {
+      if (Platform.OS === 'web') {
+        showAlert("WEB MODE", "Biometrics are for the mobile app.", "info");
+        return;
+      }
       const hasHardware = await LocalAuthentication.hasHardwareAsync();
       if (!hasHardware) return showAlert("HARDWARE ERROR", "Biometrics unavailable.", "error");
       const result = await LocalAuthentication.authenticateAsync({ promptMessage: 'Authorize' });
@@ -673,28 +720,53 @@ export default function NexusScreen() {
       }
     } else {
       setBiometricsEnabled(false);
-      await SecureStore.deleteItemAsync('use_biometrics');
+      if (Platform.OS === 'web') {
+        localStorage.removeItem('use_biometrics');
+      } else {
+        await SecureStore.deleteItemAsync('use_biometrics');
+      }
     }
   };
 
   const handleDownloadImage = async () => {
     if (!previewImage) return;
     try {
-      const filename = FileSystem.cacheDirectory + `whisper_essence_${Date.now()}.png`;
-      if (previewImage.startsWith('data:image')) {
-        const base64Data = previewImage.split('base64,')[1];
-        await FileSystem.writeAsStringAsync(filename, base64Data, { encoding: FileSystem.EncodingType.Base64 });
-        await Sharing.shareAsync(filename);
+      if (Platform.OS === 'web') {
+        if (!previewImage.startsWith('data:image')) {
+          // Si es URL de Cloudinary, abrimos directamente.
+          window.open(previewImage, '_blank');
+          showAlert(language === 'es' ? "ENLACE ABIERTO" : "LINK OPENED", language === 'es' ? "Guarda la imagen desde la nueva pestaña." : "Save the image from the new tab.", "success");
+        } else {
+          // Si por alguna razón es un texto Base64, usamos el enlace invisible
+          const link = document.createElement('a');
+          link.href = previewImage;
+          link.download = `whisper_essence_${Date.now()}.png`;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          showAlert(language === 'es' ? "DESCARGADO" : "DOWNLOADED", language === 'es' ? "Imagen guardada con éxito." : "Image saved successfully.", "success");
+        }
       } else {
-        const download = await FileSystem.downloadAsync(previewImage, filename);
-        if (download.status === 200) await Sharing.shareAsync(download.uri);
+        // Lógica original para la App Móvil
+        const filename = FileSystem.cacheDirectory + `whisper_essence_${Date.now()}.png`;
+        if (previewImage.startsWith('data:image')) {
+          const base64Data = previewImage.split('base64,')[1];
+          await FileSystem.writeAsStringAsync(filename, base64Data, { encoding: FileSystem.EncodingType.Base64 });
+          await Sharing.shareAsync(filename);
+        } else {
+          const download = await FileSystem.downloadAsync(previewImage, filename);
+          if (download.status === 200) await Sharing.shareAsync(download.uri);
+        }
       }
-    } catch (error) { showAlert("Error", "Could not process image.", "error"); }
+    } catch (error) { 
+      console.error(error);
+      showAlert("Error", "Could not process image.", "error"); 
+    }
   };
 
   const activateDailyRoutine = async () => {
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    if (Device.isDevice) {
+    if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    if (Device.isDevice && Platform.OS !== 'web') {
       const { status } = await Notifications.getPermissionsAsync();
       if (status !== 'granted') {
         const { status: newStatus } = await Notifications.requestPermissionsAsync();
@@ -713,36 +785,43 @@ export default function NexusScreen() {
           lightColor: '#FF231F7C',
         });
       }
-      await Notifications.cancelAllScheduledNotificationsAsync();
-      const morningTrigger: any = Platform.OS === 'ios'
-        ? { type: Notifications.SchedulableTriggerInputTypes.CALENDAR, hour: 9, minute: 0, repeats: true }
-        : { type: Notifications.SchedulableTriggerInputTypes.DAILY, hour: 9, minute: 0 };
-      const nightTrigger: any = Platform.OS === 'ios'
-        ? { type: Notifications.SchedulableTriggerInputTypes.CALENDAR, hour: 21, minute: 0, repeats: true }
-        : { type: Notifications.SchedulableTriggerInputTypes.DAILY, hour: 21, minute: 0 };
+      
+      if (Platform.OS !== 'web') {
+        await Notifications.cancelAllScheduledNotificationsAsync();
+        const morningTrigger: any = Platform.OS === 'ios'
+          ? { type: Notifications.SchedulableTriggerInputTypes.CALENDAR, hour: 9, minute: 0, repeats: true }
+          : { type: Notifications.SchedulableTriggerInputTypes.DAILY, hour: 9, minute: 0 };
+        const nightTrigger: any = Platform.OS === 'ios'
+          ? { type: Notifications.SchedulableTriggerInputTypes.CALENDAR, hour: 21, minute: 0, repeats: true }
+          : { type: Notifications.SchedulableTriggerInputTypes.DAILY, hour: 21, minute: 0 };
 
-      await Notifications.scheduleNotificationAsync({
-        content: { 
-            title: language === 'es' ? "☀️ Buenos Días" : "☀️ Good Morning", 
-            body: language === 'es' ? "Alice está lista para orientar tu día." : "Alice is ready to help you orient your day.", 
-            sound: true, 
-            priority: Notifications.AndroidNotificationPriority.HIGH,
-            data: { mode: 'morning' }
-        },
-        trigger: morningTrigger,
-      });
-      await Notifications.scheduleNotificationAsync({
-        content: { 
-            title: language === 'es' ? "🌙 Hora del Diario" : "🌙 Journal Time", 
-            body: language === 'es' ? "Cierra el día para despejar tu mente." : "Close the day to clear your mind.", 
-            sound: true, 
-            priority: Notifications.AndroidNotificationPriority.HIGH,
-            data: { mode: 'night' }
-        },
-        trigger: nightTrigger,
-      });
+        await Notifications.scheduleNotificationAsync({
+          content: { 
+              title: language === 'es' ? "☀️ Buenos Días" : "☀️ Good Morning", 
+              body: language === 'es' ? "Alice está lista para orientar tu día." : "Alice is ready to help you orient your day.", 
+              sound: true, 
+              priority: Notifications.AndroidNotificationPriority.HIGH,
+              data: { mode: 'morning' }
+          },
+          trigger: morningTrigger,
+        });
+        await Notifications.scheduleNotificationAsync({
+          content: { 
+              title: language === 'es' ? "🌙 Hora del Diario" : "🌙 Journal Time", 
+              body: language === 'es' ? "Cierra el día para despejar tu mente." : "Close the day to clear your mind.", 
+              sound: true, 
+              priority: Notifications.AndroidNotificationPriority.HIGH,
+              data: { mode: 'night' }
+          },
+          trigger: nightTrigger,
+        });
+      }
 
-      await SecureStore.setItemAsync('whisper_alarm_enabled', 'true');
+      if (Platform.OS === 'web') {
+        localStorage.setItem('whisper_alarm_enabled', 'true');
+      } else {
+        await SecureStore.setItemAsync('whisper_alarm_enabled', 'true');
+      }
 
       showAlert("ROUTINE SYNCED", language === 'es' ? "Alice te despertará (9:00) y te conectará (21:00)." : "Alice will wake you (9:00) and ground you (21:00).", "success");
     } catch (error: any) {
@@ -1114,13 +1193,13 @@ export default function NexusScreen() {
               <View style={styles.langSelectorRow}>
                 <TouchableOpacity 
                   style={[styles.langBtn, language === 'en' && styles.langBtnActive]} 
-                  onPress={() => { setLanguage('en'); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
+                  onPress={() => { setLanguage('en'); if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
                 >
                   <Text style={[styles.langBtnText, language === 'en' && styles.langBtnTextActive]}>ENGLISH</Text>
                 </TouchableOpacity>
                 <TouchableOpacity 
                   style={[styles.langBtn, language === 'es' && styles.langBtnActive]} 
-                  onPress={() => { setLanguage('es'); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
+                  onPress={() => { setLanguage('es'); if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
                 >
                   <Text style={[styles.langBtnText, language === 'es' && styles.langBtnTextActive]}>ESPAÑOL</Text>
                 </TouchableOpacity>
@@ -1208,8 +1287,11 @@ const styles = StyleSheet.create({
   alertBtnText: { color: 'white', fontWeight: 'bold', fontSize: 10, letterSpacing: 1 },
   alertBtnGhost: { paddingVertical: 12, paddingHorizontal: 30 },
   alertBtnTextGhost: { color: '#64748B', fontWeight: 'bold', fontSize: 10, letterSpacing: 1 },
-  settingsOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'flex-end' },
-  settingsContainer: { height: '85%', backgroundColor: '#020617', borderTopLeftRadius: 30, borderTopRightRadius: 30, borderWidth: 1, borderColor: '#1e293b' },
+  
+  // ✅ CORRECCIÓN DEL CONTENEDOR DE AJUSTES
+  settingsOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'flex-end', alignItems: 'center' },
+  settingsContainer: { width: '100%', maxWidth: Platform.OS === 'web' ? 480 : '100%', height: '85%', backgroundColor: '#020617', borderTopLeftRadius: 30, borderTopRightRadius: 30, borderWidth: 1, borderColor: '#1e293b' },
+  
   settingsHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 25, borderBottomWidth: 1, borderBottomColor: '#1e293b' },
   settingsTitle: { color: '#fff', fontSize: 16, fontWeight: '900', letterSpacing: 2 },
   settingsBody: { padding: 25 },
