@@ -32,6 +32,7 @@ import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import * as LocalAuthentication from 'expo-local-authentication';
 import * as Haptics from 'expo-haptics';
+import * as Localization from 'expo-localization';
 // ✅ NUEVO: Importación del SDK de RevenueCat
 import Purchases from 'react-native-purchases';
 import { API_URL, apiFetch } from '../../utils/api';
@@ -58,21 +59,39 @@ const MODES = [
 
 const SLEEP_COLOR = '#8B5CF6';
 
-// Recursos de ayuda (mismos que safety.py del backend). Siempre accesibles desde la cabecera.
-type RecursoAyuda = { nombre: string; descripcion: string; telefono?: string; sms?: boolean; url?: string };
-const RECURSOS_AYUDA: Record<'es' | 'en', RecursoAyuda[]> = {
-  es: [
+// Recursos de ayuda por región del dispositivo. Se eligen aquí y no por el texto:
+// un usuario de México que escribe en español no puede recibir números de España.
+// Los de España y EE. UU. coinciden con safety.py del backend.
+type RecursoAyuda = { nombre: string; descripcion: string; telefono?: string; sms?: string; url?: string };
+const RECURSOS_AYUDA: Record<'ES' | 'ES_OTROS' | 'US' | 'EN_OTROS', RecursoAyuda[]> = {
+  ES: [
     { nombre: 'Línea 024', descripcion: 'Atención a la conducta suicida. Gratis, 24 horas.', telefono: '024' },
     { nombre: 'Emergencias', descripcion: 'Si estás en peligro ahora mismo.', telefono: '112' },
-    { nombre: '016', descripcion: 'Si alguien te está haciendo daño. Gratis, 24 horas.', telefono: '016' },
+    { nombre: '016', descripcion: 'Violencia contra las mujeres (pareja, sexual, acoso). Gratis, 24 horas.', telefono: '016' },
+    { nombre: '016 por WhatsApp', descripcion: 'Si no puedes hablar en voz alta.', url: 'https://wa.me/34600000016' },
     { nombre: 'Fundación ANAR', descripcion: 'Si eres menor de edad. Gratis, 24 horas.', telefono: '900202010' },
   ],
-  en: [
-    { nombre: '988 Lifeline', descripcion: 'Call or text, free, 24/7 (US).', telefono: '988', sms: true },
-    { nombre: 'Emergency', descripcion: 'If you are in danger right now.', telefono: '911' },
-    { nombre: 'Domestic Violence Hotline', descripcion: 'If someone is hurting you (US).', telefono: '18007997233' },
-    { nombre: 'Find a helpline', descripcion: 'Outside the US: findahelpline.com', url: 'https://findahelpline.com' },
+  ES_OTROS: [
+    { nombre: 'Línea de ayuda de tu país', descripcion: 'Busca el teléfono gratuito de tu país en findahelpline.com.', url: 'https://findahelpline.com/es-419' },
+    { nombre: 'Emergencias', descripcion: 'Si estás en peligro ahora mismo, llama al número de emergencias de tu país.' },
   ],
+  US: [
+    { nombre: '988 Lifeline', descripcion: 'Call or text, free, 24/7. En español: opción 2 o envía AYUDA.', telefono: '988', sms: '988' },
+    { nombre: 'Emergency', descripcion: 'If you are in danger right now.', telefono: '911' },
+    { nombre: 'Domestic Violence Hotline', descripcion: 'If someone is hurting you. Free, 24/7.', telefono: '18007997233' },
+  ],
+  EN_OTROS: [
+    { nombre: 'Find a helpline', descripcion: 'Free helplines in your country: findahelpline.com', url: 'https://findahelpline.com' },
+    { nombre: 'Emergency', descripcion: 'If you are in danger right now, call your local emergency number.' },
+  ],
+};
+
+const recursosPorRegion = (language: string): RecursoAyuda[] => {
+  let region = '';
+  try { region = (Localization.getLocales()[0]?.regionCode || '').toUpperCase(); } catch { /* sin región: lista internacional */ }
+  if (region === 'ES') return RECURSOS_AYUDA.ES;
+  if (region === 'US' || region === 'CA') return RECURSOS_AYUDA.US;
+  return language === 'es' ? RECURSOS_AYUDA.ES_OTROS : RECURSOS_AYUDA.EN_OTROS;
 };
 
 Notifications.setNotificationHandler({
@@ -129,7 +148,7 @@ export default function NexusScreen() {
   const recordingStartTimeRef = useRef<number>(0);
 
   const [showSettingsModal, setShowSettingsModal] = useState(false);
-  const [ayuda, setAyuda] = useState<{ texto?: string; recursos: RecursoAyuda[] } | null>(null);
+  const [ayuda, setAyuda] = useState<{ texto?: string } | null>(null);
   const [biometricsEnabled, setBiometricsEnabled] = useState(false);
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [userStatus, setUserStatus] = useState({ username: '', role: 'free', is_founder: false });
@@ -338,6 +357,16 @@ export default function NexusScreen() {
   }, []);
 
   useFocusEffect(useCallback(() => { return () => { stopSpeaking(); }; }, []));
+
+  // Antes de llamar: que Alice deje de hablar (y no vuelva a sonar al colgar).
+  const abrirAyuda = async (url: string) => {
+    await stopSpeaking();
+    Linking.openURL(url).catch(() => {
+      showAlert(language === 'es' ? 'NO DISPONIBLE' : 'NOT AVAILABLE',
+        language === 'es' ? 'Este dispositivo no puede abrirlo. Marca el número desde un teléfono.' : 'This device cannot open it. Dial the number from a phone.',
+        'warning');
+    });
+  };
 
   const stopSpeaking = async () => {
     if (soundRef.current) {
@@ -595,15 +624,17 @@ export default function NexusScreen() {
     setAiThinking(false);
     if (!res.ok) throw new Error(data.detail || "Server error");
     
-    if (data.limit_reached) {
-        if (data.audio_url) await playStream(`${API_URL}${data.audio_url}`, null);
-        setTimeout(() => router.push('/subscription'), 2500); 
-        return; 
+    // Protocolo de crisis: los recursos de ayuda se ven siempre, también en modo voz
+    // y aunque se haya agotado el cupo. Con ayuda abierta no hay muro de pago ni tarjeta encima.
+    const hayAyuda = Array.isArray(data.recursos) && data.recursos.length > 0;
+    if (hayAyuda) {
+      setAyuda({ texto: data.aviso || (data.crisis ? data.text : undefined) });
     }
 
-    // Protocolo de crisis: los recursos de ayuda se ven siempre, también en modo voz.
-    if (Array.isArray(data.recursos) && data.recursos.length > 0) {
-      setAyuda({ texto: data.text, recursos: data.recursos });
+    if (data.limit_reached) {
+        if (data.audio_url) await playStream(`${API_URL}${data.audio_url}`, null);
+        if (!hayAyuda) setTimeout(() => router.push('/subscription'), 2500); 
+        return; 
     }
 
     if (data.proposed_vibration) {
@@ -622,7 +653,7 @@ export default function NexusScreen() {
       
       setProposedVibration(data.proposed_vibration);
       // ✅ NUEVO: Eliminamos la restricción del modo. Si Alice envía una propuesta de vibración, mostramos el modal.
-      if (data.proposed_vibration) {
+      if (data.proposed_vibration && !hayAyuda) {
         setTimeout(() => setShowVibrationModal(true), 1500);
       }
     }
@@ -810,7 +841,7 @@ export default function NexusScreen() {
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{flex:1}}>
       
       <View style={styles.headerContainer}>
-        <View>
+        <View style={{ flexShrink: 1 }}>
           {/* ✅ CERRADURA SECRETA: 5 toques en el título para abrir el Modo Dios */}
           <TouchableOpacity activeOpacity={1} onPress={handleGodModeTap}>
             <Text style={styles.title}>{t('nexus.title')}</Text>
@@ -831,7 +862,7 @@ export default function NexusScreen() {
           <TouchableOpacity onPress={activateDailyRoutine} style={{padding: 5}}>
             <Ionicons name="alarm-outline" size={24} color={currentMode.color} style={{opacity: 0.8}} />
           </TouchableOpacity>
-          <TouchableOpacity onPress={() => setAyuda({ recursos: RECURSOS_AYUDA[language === 'es' ? 'es' : 'en'] })} style={{padding: 5}} accessibilityLabel={language === 'es' ? 'Ayuda' : 'Help'}>
+          <TouchableOpacity onPress={() => setAyuda({})} style={{padding: 5}} accessibilityRole="button" accessibilityLabel={language === 'es' ? 'Teléfonos de ayuda' : 'Helplines'}>
             <Ionicons name="help-buoy-outline" size={24} color="rgba(255,255,255,0.7)" />
           </TouchableOpacity>
           <TouchableOpacity onPress={() => setShowSettingsModal(true)} style={{padding: 5}}>
@@ -1073,30 +1104,30 @@ export default function NexusScreen() {
       <Modal visible={ayuda !== null} transparent={true} animationType="fade" onRequestClose={() => setAyuda(null)}>
         <View style={styles.modalOverlay}>
           <View style={styles.ayudaCaja}>
-            <Text style={styles.ayudaTitulo}>
+            <Text style={styles.ayudaTitulo} accessibilityRole="header">
               {language === 'es' ? 'No tienes que pasar por esto a solas' : "You don't have to go through this alone"}
             </Text>
-            {ayuda?.texto ? <Text style={styles.ayudaTexto}>{ayuda.texto}</Text> : null}
-            <ScrollView style={{ maxHeight: SCREEN_HEIGHT * 0.45, width: '100%' }}>
-              {ayuda?.recursos.map((r) => (
+            <ScrollView style={{ width: '100%', flexGrow: 0, flexShrink: 1 }}>
+              {ayuda?.texto ? <Text style={styles.ayudaTexto}>{ayuda.texto}</Text> : null}
+              {recursosPorRegion(language).map((r) => (
                 <View key={r.nombre} style={styles.ayudaRecurso}>
                   <Text style={styles.ayudaNombre}>{r.nombre}</Text>
                   <Text style={styles.ayudaDescripcion}>{r.descripcion}</Text>
-                  <View style={{ flexDirection: 'row', gap: 10, marginTop: 8 }}>
+                  <View style={{ flexDirection: 'row', gap: 10, marginTop: 8, flexWrap: 'wrap' }}>
                     {r.telefono ? (
-                      <TouchableOpacity style={styles.ayudaBoton} onPress={() => Linking.openURL(`tel:${r.telefono}`)}>
+                      <TouchableOpacity style={styles.ayudaBoton} accessibilityRole="button" onPress={() => abrirAyuda(`tel:${r.telefono}`)}>
                         <Ionicons name="call" size={16} color="#000" />
                         <Text style={styles.ayudaBotonTexto}>{language === 'es' ? `Llamar al ${r.telefono}` : `Call ${r.telefono}`}</Text>
                       </TouchableOpacity>
                     ) : null}
-                    {r.sms && r.telefono ? (
-                      <TouchableOpacity style={styles.ayudaBoton} onPress={() => Linking.openURL(`sms:${r.telefono}`)}>
+                    {r.sms ? (
+                      <TouchableOpacity style={styles.ayudaBoton} accessibilityRole="button" onPress={() => abrirAyuda(language === 'es' ? `sms:${r.sms}?body=AYUDA` : `sms:${r.sms}`)}>
                         <Ionicons name="chatbubble" size={16} color="#000" />
                         <Text style={styles.ayudaBotonTexto}>{language === 'es' ? 'SMS' : 'Text'}</Text>
                       </TouchableOpacity>
                     ) : null}
                     {r.url ? (
-                      <TouchableOpacity style={styles.ayudaBoton} onPress={() => Linking.openURL(r.url!)}>
+                      <TouchableOpacity style={styles.ayudaBoton} accessibilityRole="button" onPress={() => abrirAyuda(r.url!)}>
                         <Ionicons name="open-outline" size={16} color="#000" />
                         <Text style={styles.ayudaBotonTexto}>{language === 'es' ? 'Abrir' : 'Open'}</Text>
                       </TouchableOpacity>
@@ -1104,8 +1135,13 @@ export default function NexusScreen() {
                   </View>
                 </View>
               ))}
+              <Text style={styles.ayudaAviso}>
+                {language === 'es'
+                  ? 'Alice no sustituye a un profesional ni a los servicios de emergencia.'
+                  : 'Alice is not a substitute for a professional or for emergency services.'}
+              </Text>
             </ScrollView>
-            <TouchableOpacity onPress={() => setAyuda(null)} style={{ marginTop: 15, padding: 10 }}>
+            <TouchableOpacity onPress={() => setAyuda(null)} style={{ marginTop: 15, padding: 10 }} accessibilityRole="button">
               <Text style={{ color: '#94A3B8', fontWeight: '600' }}>{language === 'es' ? 'Cerrar' : 'Close'}</Text>
             </TouchableOpacity>
           </View>
@@ -1244,7 +1280,7 @@ export default function NexusScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#000000' },
   headerContainer: { marginTop: Platform.OS === 'android' ? 60 : 20, paddingHorizontal: 30, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', width: '100%' },
-  iconsRow: { flexDirection: 'row', gap: 15, paddingTop: 5 },
+  iconsRow: { flexDirection: 'row', gap: 8, paddingTop: 5 },
   title: { fontSize: 28, fontWeight: '900', color: 'white', letterSpacing: 6 },
   subtitle: { fontSize: 11, letterSpacing: 2, fontWeight:'700', marginTop: 0 },
   modeIndicator: { width: 6, height: 6, borderRadius: 3 },
@@ -1272,7 +1308,8 @@ const styles = StyleSheet.create({
   playButtonMini: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 8, paddingHorizontal: 15, borderRadius: 20, borderWidth: 1, backgroundColor: 'rgba(0,0,0,0.5)', alignSelf: 'center' },
   playButtonText: { fontSize: 10, fontWeight: 'bold', letterSpacing: 1 },
   modalOverlay: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.9)' },
-  ayudaCaja: { width: '88%', backgroundColor: '#0F172A', borderRadius: 20, padding: 22, alignItems: 'center', borderWidth: 1, borderColor: '#334155' },
+  ayudaCaja: { width: '88%', maxHeight: '90%', backgroundColor: '#0F172A', borderRadius: 20, padding: 22, alignItems: 'center', borderWidth: 1, borderColor: '#334155' },
+  ayudaAviso: { color: '#64748B', fontSize: 12, textAlign: 'center', marginTop: 6 },
   ayudaTitulo: { color: '#fff', fontSize: 18, fontWeight: '700', textAlign: 'center', marginBottom: 10 },
   ayudaTexto: { color: '#CBD5E1', fontSize: 14, lineHeight: 20, textAlign: 'center', marginBottom: 12 },
   ayudaRecurso: { backgroundColor: '#1E293B', borderRadius: 14, padding: 14, marginBottom: 10 },
