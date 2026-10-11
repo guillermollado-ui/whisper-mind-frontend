@@ -4,7 +4,7 @@ export const translations = {
   en: {
     nexus: {
       title: "N E X U S",
-      modes: { default: "Therapist", calm: "Anxiety", sleep: "Sleep", win: "Coach", dream: "Dream" },
+      modes: { default: "Companion", calm: "Anxiety", sleep: "Sleep", win: "Coach", dream: "Dream" },
       descriptions: { default: "Open dialogue space.", calm: "Panic relief protocol.", sleep: "Hypnotic drift engine.", win: "Strategic alignment.", dream: "Subconscious interpreter." },
       placeholders: { mic_listening: "LISTENING...", mic_processing: "PROCESSING DATA STREAM...", mic_tap: "TAP MIC TO SPEAK • TAP DOTS TO SHIFT", text_input: "Alice is listening...", text_label: "TYPE YOUR THOUGHTS", btn_transmit: "TRANSMIT" }
     },
@@ -127,7 +127,7 @@ export const translations = {
   es: {
     nexus: {
       title: "N E X U S",
-      modes: { default: "Terapeuta", calm: "Ansiedad", sleep: "Sueño", win: "Coach", dream: "Sueños" },
+      modes: { default: "Compañera", calm: "Ansiedad", sleep: "Sueño", win: "Coach", dream: "Sueños" },
       descriptions: { default: "Espacio de diálogo abierto.", calm: "Protocolo de alivio de pánico.", sleep: "Motor de deriva hipnótica.", win: "Alineación estratégica.", dream: "Intérprete del subconsciente." },
       placeholders: { mic_listening: "ESCUCHANDO...", mic_processing: "PROCESANDO DATOS...", mic_tap: "TOCA EL MIC PARA HABLAR • TOCA PUNTOS PARA CAMBIAR", text_input: "Alice te escucha...", text_label: "ESCRIBE TUS PENSAMIENTOS", btn_transmit: "TRANSMITIR" }
     },

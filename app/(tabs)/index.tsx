@@ -18,7 +18,8 @@ import {
   KeyboardAvoidingView,
   Keyboard,
   ActivityIndicator,
-  Dimensions
+  Dimensions,
+  Linking
 } from 'react-native';
 import { Audio } from 'expo-av';
 import { Ionicons } from '@expo/vector-icons';
@@ -56,6 +57,23 @@ const MODES = [
 ];
 
 const SLEEP_COLOR = '#8B5CF6';
+
+// Recursos de ayuda (mismos que safety.py del backend). Siempre accesibles desde la cabecera.
+type RecursoAyuda = { nombre: string; descripcion: string; telefono?: string; sms?: boolean; url?: string };
+const RECURSOS_AYUDA: Record<'es' | 'en', RecursoAyuda[]> = {
+  es: [
+    { nombre: 'Línea 024', descripcion: 'Atención a la conducta suicida. Gratis, 24 horas.', telefono: '024' },
+    { nombre: 'Emergencias', descripcion: 'Si estás en peligro ahora mismo.', telefono: '112' },
+    { nombre: '016', descripcion: 'Si alguien te está haciendo daño. Gratis, 24 horas.', telefono: '016' },
+    { nombre: 'Fundación ANAR', descripcion: 'Si eres menor de edad. Gratis, 24 horas.', telefono: '900202010' },
+  ],
+  en: [
+    { nombre: '988 Lifeline', descripcion: 'Call or text, free, 24/7 (US).', telefono: '988', sms: true },
+    { nombre: 'Emergency', descripcion: 'If you are in danger right now.', telefono: '911' },
+    { nombre: 'Domestic Violence Hotline', descripcion: 'If someone is hurting you (US).', telefono: '18007997233' },
+    { nombre: 'Find a helpline', descripcion: 'Outside the US: findahelpline.com', url: 'https://findahelpline.com' },
+  ],
+};
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -111,6 +129,7 @@ export default function NexusScreen() {
   const recordingStartTimeRef = useRef<number>(0);
 
   const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [ayuda, setAyuda] = useState<{ texto?: string; recursos: RecursoAyuda[] } | null>(null);
   const [biometricsEnabled, setBiometricsEnabled] = useState(false);
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [userStatus, setUserStatus] = useState({ username: '', role: 'free', is_founder: false });
@@ -582,6 +601,11 @@ export default function NexusScreen() {
         return; 
     }
 
+    // Protocolo de crisis: los recursos de ayuda se ven siempre, también en modo voz.
+    if (Array.isArray(data.recursos) && data.recursos.length > 0) {
+      setAyuda({ texto: data.text, recursos: data.recursos });
+    }
+
     if (data.proposed_vibration) {
       let imgSource = data.image || data.proposed_vibration.existing_image_url;
       if (imgSource) {
@@ -806,6 +830,9 @@ export default function NexusScreen() {
           </TouchableOpacity>
           <TouchableOpacity onPress={activateDailyRoutine} style={{padding: 5}}>
             <Ionicons name="alarm-outline" size={24} color={currentMode.color} style={{opacity: 0.8}} />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => setAyuda({ recursos: RECURSOS_AYUDA[language === 'es' ? 'es' : 'en'] })} style={{padding: 5}} accessibilityLabel={language === 'es' ? 'Ayuda' : 'Help'}>
+            <Ionicons name="help-buoy-outline" size={24} color="rgba(255,255,255,0.7)" />
           </TouchableOpacity>
           <TouchableOpacity onPress={() => setShowSettingsModal(true)} style={{padding: 5}}>
             <Ionicons name="settings-outline" size={24} color="rgba(255,255,255,0.7)" />
@@ -1043,6 +1070,48 @@ export default function NexusScreen() {
         </View>
       </Modal>
 
+      <Modal visible={ayuda !== null} transparent={true} animationType="fade" onRequestClose={() => setAyuda(null)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.ayudaCaja}>
+            <Text style={styles.ayudaTitulo}>
+              {language === 'es' ? 'No tienes que pasar por esto a solas' : "You don't have to go through this alone"}
+            </Text>
+            {ayuda?.texto ? <Text style={styles.ayudaTexto}>{ayuda.texto}</Text> : null}
+            <ScrollView style={{ maxHeight: SCREEN_HEIGHT * 0.45, width: '100%' }}>
+              {ayuda?.recursos.map((r) => (
+                <View key={r.nombre} style={styles.ayudaRecurso}>
+                  <Text style={styles.ayudaNombre}>{r.nombre}</Text>
+                  <Text style={styles.ayudaDescripcion}>{r.descripcion}</Text>
+                  <View style={{ flexDirection: 'row', gap: 10, marginTop: 8 }}>
+                    {r.telefono ? (
+                      <TouchableOpacity style={styles.ayudaBoton} onPress={() => Linking.openURL(`tel:${r.telefono}`)}>
+                        <Ionicons name="call" size={16} color="#000" />
+                        <Text style={styles.ayudaBotonTexto}>{language === 'es' ? `Llamar al ${r.telefono}` : `Call ${r.telefono}`}</Text>
+                      </TouchableOpacity>
+                    ) : null}
+                    {r.sms && r.telefono ? (
+                      <TouchableOpacity style={styles.ayudaBoton} onPress={() => Linking.openURL(`sms:${r.telefono}`)}>
+                        <Ionicons name="chatbubble" size={16} color="#000" />
+                        <Text style={styles.ayudaBotonTexto}>{language === 'es' ? 'SMS' : 'Text'}</Text>
+                      </TouchableOpacity>
+                    ) : null}
+                    {r.url ? (
+                      <TouchableOpacity style={styles.ayudaBoton} onPress={() => Linking.openURL(r.url!)}>
+                        <Ionicons name="open-outline" size={16} color="#000" />
+                        <Text style={styles.ayudaBotonTexto}>{language === 'es' ? 'Abrir' : 'Open'}</Text>
+                      </TouchableOpacity>
+                    ) : null}
+                  </View>
+                </View>
+              ))}
+            </ScrollView>
+            <TouchableOpacity onPress={() => setAyuda(null)} style={{ marginTop: 15, padding: 10 }}>
+              <Text style={{ color: '#94A3B8', fontWeight: '600' }}>{language === 'es' ? 'Cerrar' : 'Close'}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
       <Modal visible={showSettingsModal} animationType="slide" transparent={true} onRequestClose={() => setShowSettingsModal(false)}>
         <View style={styles.settingsOverlay}>
           <View style={styles.settingsContainer}>
@@ -1203,6 +1272,14 @@ const styles = StyleSheet.create({
   playButtonMini: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 8, paddingHorizontal: 15, borderRadius: 20, borderWidth: 1, backgroundColor: 'rgba(0,0,0,0.5)', alignSelf: 'center' },
   playButtonText: { fontSize: 10, fontWeight: 'bold', letterSpacing: 1 },
   modalOverlay: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.9)' },
+  ayudaCaja: { width: '88%', backgroundColor: '#0F172A', borderRadius: 20, padding: 22, alignItems: 'center', borderWidth: 1, borderColor: '#334155' },
+  ayudaTitulo: { color: '#fff', fontSize: 18, fontWeight: '700', textAlign: 'center', marginBottom: 10 },
+  ayudaTexto: { color: '#CBD5E1', fontSize: 14, lineHeight: 20, textAlign: 'center', marginBottom: 12 },
+  ayudaRecurso: { backgroundColor: '#1E293B', borderRadius: 14, padding: 14, marginBottom: 10 },
+  ayudaNombre: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  ayudaDescripcion: { color: '#94A3B8', fontSize: 13, marginTop: 2 },
+  ayudaBoton: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#38BDF8', paddingVertical: 8, paddingHorizontal: 14, borderRadius: 20 },
+  ayudaBotonTexto: { color: '#000', fontWeight: '700', fontSize: 13 },
   cyberAlertBox: { width: 320, backgroundColor: '#09090b', padding: 30, borderRadius: 0, alignItems: 'center', borderWidth: 1, shadowColor: '#000', shadowOffset: {width: 0, height: 10}, shadowOpacity: 0.8, shadowRadius: 30 },
   alertBtn: { paddingVertical: 12, paddingHorizontal: 30, borderRadius: 0, borderWidth: 1, borderColor: '#334155' },
   alertBtnText: { color: 'white', fontWeight: 'bold', fontSize: 10, letterSpacing: 1 },
