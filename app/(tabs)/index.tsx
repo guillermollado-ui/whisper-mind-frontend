@@ -63,7 +63,7 @@ const SLEEP_COLOR = '#8B5CF6';
 // un usuario de México que escribe en español no puede recibir números de España.
 // Los de España y EE. UU. coinciden con safety.py del backend.
 type RecursoAyuda = { nombre: string; descripcion: string; telefono?: string; sms?: string; url?: string };
-const RECURSOS_AYUDA: Record<'ES' | 'ES_OTROS' | 'US' | 'EN_OTROS', RecursoAyuda[]> = {
+const RECURSOS_AYUDA: Record<'ES' | 'ES_OTROS' | 'US' | 'EN_OTROS' | 'GB' | 'MX', RecursoAyuda[]> = {
   ES: [
     { nombre: 'Línea 024', descripcion: 'Atención a la conducta suicida. Gratis, 24 horas.', telefono: '024' },
     { nombre: 'Emergencias', descripcion: 'Si estás en peligro ahora mismo.', telefono: '112' },
@@ -80,6 +80,16 @@ const RECURSOS_AYUDA: Record<'ES' | 'ES_OTROS' | 'US' | 'EN_OTROS', RecursoAyuda
     { nombre: 'Emergency', descripcion: 'If you are in danger right now.', telefono: '911' },
     { nombre: 'Domestic Violence Hotline', descripcion: 'If someone is hurting you. Free, 24/7.', telefono: '18007997233' },
   ],
+  GB: [
+    { nombre: 'Samaritans', descripcion: 'Free, 24/7. Call 116 123.', telefono: '116123' },
+    { nombre: 'Emergency', descripcion: 'If you are in danger right now.', telefono: '999' },
+    { nombre: 'Find a helpline', descripcion: 'More helplines: findahelpline.com', url: 'https://findahelpline.com' },
+  ],
+  MX: [
+    { nombre: 'Línea de la Vida', descripcion: 'Gratis, 24 horas, en todo México.', telefono: '8009112000' },
+    { nombre: 'Emergencias', descripcion: 'Si estás en peligro ahora mismo.', telefono: '911' },
+    { nombre: 'Otras líneas', descripcion: 'Más teléfonos de ayuda: findahelpline.com', url: 'https://findahelpline.com/es-419' },
+  ],
   EN_OTROS: [
     { nombre: 'Find a helpline', descripcion: 'Free helplines in your country: findahelpline.com', url: 'https://findahelpline.com' },
     { nombre: 'Emergency', descripcion: 'If you are in danger right now, call your local emergency number.' },
@@ -91,6 +101,8 @@ const recursosPorRegion = (language: string): RecursoAyuda[] => {
   try { region = (Localization.getLocales()[0]?.regionCode || '').toUpperCase(); } catch { /* sin región: lista internacional */ }
   if (region === 'ES') return RECURSOS_AYUDA.ES;
   if (region === 'US' || region === 'CA') return RECURSOS_AYUDA.US;
+  if (region === 'GB' || region === 'IE') return RECURSOS_AYUDA.GB;
+  if (region === 'MX') return RECURSOS_AYUDA.MX;
   return language === 'es' ? RECURSOS_AYUDA.ES_OTROS : RECURSOS_AYUDA.EN_OTROS;
 };
 
@@ -481,10 +493,16 @@ export default function NexusScreen() {
         body: JSON.stringify(payload)
       });
       if (res.ok) {
-        showAlert("OFFERING ACCEPTED", "Your essence is now resonating.", "success");
+        const data = await res.json().catch(() => ({}));
         setProposedVibration(null);
         setPreviewImage(null);
         setShowVibrationModal(false);
+        if (data && data.crisis) {
+          // El backend no publica y devuelve ayuda: nada de "aceptado".
+          setAyuda({ texto: data.text });
+        } else {
+          showAlert("OFFERING ACCEPTED", "Your essence is now resonating.", "success");
+        }
       } else { throw new Error("Failed"); }
     } catch (e: any) {
       if (e.message === 'SESSION_EXPIRED') return;
