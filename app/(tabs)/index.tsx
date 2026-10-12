@@ -155,7 +155,7 @@ export default function NexusScreen() {
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [showVibrationModal, setShowVibrationModal] = useState(false);
   const [isPublishing, setIsPublishing] = useState(false);
-  // Día 9: la imagen llega después de la respuesta; se pregunta por ella hasta 20 s.
+  // Día 9: la imagen llega después de la respuesta; se pregunta por ella hasta 60 s.
   const [imagePending, setImagePending] = useState(false);
   const esperaImagenRef = useRef(0);
 
@@ -641,12 +641,13 @@ export default function NexusScreen() {
     }
   };
 
-  // Pregunta por la imagen cada 1,5 s durante 20 s como mucho. Una respuesta nueva,
-  // descartar la tarjeta o publicar invalidan la espera anterior.
+  // Pregunta por la imagen cada 1,5 s durante 60 s como mucho: el peor caso del backend
+  // (moderación, proveedores con su reintento y subida) pasa de los 40 s. Una respuesta
+  // nueva, descartar la tarjeta o publicar invalidan la espera anterior.
   const esperarImagen = async (vaultId: string) => {
     const id = ++esperaImagenRef.current;
     setImagePending(true);
-    const limite = Date.now() + 20000;
+    const limite = Date.now() + 60000;
     try {
       while (Date.now() < limite) {
         await new Promise(resolve => setTimeout(resolve, 1500));
