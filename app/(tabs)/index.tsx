@@ -155,6 +155,9 @@ export default function NexusScreen() {
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [showVibrationModal, setShowVibrationModal] = useState(false);
   const [isPublishing, setIsPublishing] = useState(false);
+  // Día 9: la imagen llega después de la respuesta; se pregunta por ella hasta 20 s.
+  const [imagePending, setImagePending] = useState(false);
+  const esperaImagenRef = useRef(0);
 
   const recordingModeRef = useRef('default');
   const recordingStartTimeRef = useRef<number>(0);
@@ -496,6 +499,7 @@ export default function NexusScreen() {
         const data = await res.json().catch(() => ({}));
         setProposedVibration(null);
         setPreviewImage(null);
+        cancelarEsperaImagen();
         setShowVibrationModal(false);
         if (data && data.crisis) {
           // El backend no publica y devuelve ayuda: nada de "aceptado".
@@ -637,6 +641,42 @@ export default function NexusScreen() {
     }
   };
 
+  // Pregunta por la imagen cada 1,5 s durante 20 s como mucho. Una respuesta nueva,
+  // descartar la tarjeta o publicar invalidan la espera anterior.
+  const esperarImagen = async (vaultId: string) => {
+    const id = ++esperaImagenRef.current;
+    setImagePending(true);
+    const limite = Date.now() + 20000;
+    try {
+      while (Date.now() < limite) {
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        if (esperaImagenRef.current !== id) return;
+        try {
+          const res = await apiFetch(`/image/${encodeURIComponent(vaultId)}`);
+          if (res.status === 404) return;
+          if (!res.ok) continue;
+          const estado = await res.json();
+          if (esperaImagenRef.current !== id) return;
+          if (estado.status === 'ready' && estado.url) {
+            setPreviewImage(estado.url);
+            setProposedVibration((v: any) => (v && v.vault_id === vaultId ? { ...v, existing_image_url: estado.url } : v));
+            return;
+          }
+          if (estado.status === 'failed') return;
+        } catch (e: any) {
+          if (e.message === 'SESSION_EXPIRED') return;
+        }
+      }
+    } finally {
+      if (esperaImagenRef.current === id) setImagePending(false);
+    }
+  };
+
+  const cancelarEsperaImagen = () => {
+    esperaImagenRef.current++;
+    setImagePending(false);
+  };
+
   const handleBackendResponse = async (data: any, res: any, mode: string, autoPlay: boolean, onAudioComplete: (() => void) | null = null) => {
     try { if (thinkingSoundRef.current) await thinkingSoundRef.current.stopAsync(); } catch (e) {}
     setAiThinking(false);
@@ -670,6 +710,13 @@ export default function NexusScreen() {
       }
       
       setProposedVibration(data.proposed_vibration);
+      // Día 9: la imagen se genera después de la respuesta; mientras, la tarjeta indica que viene.
+      if (!imgSource && data.image_status === 'pending' && data.vault_id) {
+        setPreviewImage(null);
+        esperarImagen(data.vault_id);
+      } else {
+        cancelarEsperaImagen();
+      }
       // ✅ NUEVO: Eliminamos la restricción del modo. Si Alice envía una propuesta de vibración, mostramos el modal.
       if (data.proposed_vibration && !hayAyuda) {
         setTimeout(() => setShowVibrationModal(true), 1500);
@@ -1088,6 +1135,13 @@ export default function NexusScreen() {
             <View style={{ width: '100%', height: 220, backgroundColor: '#000', justifyContent: 'center', alignItems: 'center' }}>
               {previewImage ? (
                 <Image source={{ uri: previewImage }} style={{ width: '100%', height: '100%', opacity: 0.8 }} resizeMode="cover" />
+              ) : imagePending ? (
+                <View style={{flex:1, justifyContent:'center', alignItems:'center'}}>
+                  <ActivityIndicator color="#38BDF8" />
+                  <Text style={{ color: '#64748B', fontSize: 11, marginTop: 10, letterSpacing: 1 }}>
+                    {language === 'es' ? 'Creando tu imagen…' : 'Creating your image…'}
+                  </Text>
+                </View>
               ) : (
                 <View style={{flex:1, justifyContent:'center', alignItems:'center'}}>
                   <Ionicons name="aperture-outline" size={40} color="#334155" />
@@ -1107,10 +1161,10 @@ export default function NexusScreen() {
               <Text style={{ color: '#38BDF8', fontSize: 9, letterSpacing: 2, marginBottom: 10, fontWeight: 'bold' }}>ESSENCE DISTILLED</Text>
               <Text style={{ color: 'white', fontSize: 16, fontStyle: 'italic', textAlign: 'center', marginBottom: 20, lineHeight: 24, fontWeight: '300' }}>"{proposedVibration?.echo_text}"</Text>
               <View style={{ flexDirection: 'row', gap: 15 }}>
-                <TouchableOpacity style={styles.alertBtnGhost} onPress={() => { setShowVibrationModal(false); setPreviewImage(null); }}>
+                <TouchableOpacity style={styles.alertBtnGhost} onPress={() => { setShowVibrationModal(false); setPreviewImage(null); cancelarEsperaImagen(); }}>
                   <Text style={styles.alertBtnTextGhost}>DISCARD</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={[styles.alertBtn, {backgroundColor: 'rgba(56, 189, 248, 0.1)', borderColor: '#38BDF8'}]} onPress={publishToNetwork} disabled={isPublishing}>
+                <TouchableOpacity style={[styles.alertBtn, {backgroundColor: 'rgba(56, 189, 248, 0.1)', borderColor: '#38BDF8', opacity: imagePending ? 0.5 : 1}]} onPress={publishToNetwork} disabled={isPublishing || imagePending}>
                   <Text style={[styles.alertBtnText, {color: '#38BDF8'}]}>{isPublishing ? "SENDING..." : "RESONATE"}</Text>
                 </TouchableOpacity>
               </View>
