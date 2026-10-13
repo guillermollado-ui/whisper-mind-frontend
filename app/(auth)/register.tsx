@@ -84,6 +84,13 @@ export default function RegisterScreen() {
                 body: JSON.stringify({ token: idToken }),
             });
 
+            // Día 17: el login con Google también tiene límite de intentos.
+            if (response.status === 429) {
+              const seconds = parseInt(response.headers.get('Retry-After') || '60', 10);
+              showAlert('SYSTEM OVERLOAD', `Too many attempts. Wait ${seconds}s.`, 'error');
+              return;
+            }
+
             const data = await response.json();
 
             if (!response.ok) {
