@@ -35,7 +35,7 @@ import * as Haptics from 'expo-haptics';
 import * as Localization from 'expo-localization';
 // ✅ NUEVO: Importación del SDK de RevenueCat
 import Purchases from 'react-native-purchases';
-import { API_URL, apiFetch } from '../../utils/api';
+import { API_URL, apiFetch, getAuthToken } from '../../utils/api';
 import { useAlert } from '../../src/context/AlertContext'; 
 import { useLanguage } from '../../src/context/LanguageContext';
 import { useGodMode } from '../../src/context/GodModeContext'; // ✅ INYECTADO: El cerebro del Modo Dios
@@ -738,6 +738,9 @@ export default function NexusScreen() {
       } else {
           setSilentResponse({ text: data.text || (language === 'es' ? "Te escucho." : "I hear you."), audioUrl: `${API_URL}${data.audio_url}` });
       }
+    } else if (data.text) {
+      // Día 10: sin caracteres de voz neural este mes (tts:"device") la respuesta llega sin audio; al menos se lee.
+      setSilentResponse({ text: data.text, audioUrl: null });
     }
   };
 
@@ -746,7 +749,11 @@ export default function NexusScreen() {
       if (thinkingSoundRef.current) await thinkingSoundRef.current.stopAsync();
       if (soundRef.current) await soundRef.current.unloadAsync();
       
-      const { sound } = await Audio.Sound.createAsync({ uri: url }, { shouldPlay: true, volume: 1.0 });
+      // Día 10: el audio es solo de quien lo pidió; sin el token, el backend responde 401.
+      const token = await getAuthToken();
+      const { sound } = await Audio.Sound.createAsync(
+        { uri: url, headers: token ? { Authorization: `Bearer ${token}` } : undefined },
+        { shouldPlay: true, volume: 1.0 });
       soundRef.current = sound;
       setAiSpeaking(true);
       

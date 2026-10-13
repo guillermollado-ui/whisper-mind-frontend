@@ -24,7 +24,7 @@ import { Audio } from 'expo-av';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system';
 import ConfettiCannon from 'react-native-confetti-cannon';
-import { API_URL, apiFetch } from '../../utils/api';
+import { API_URL, apiFetch, getAuthToken } from '../../utils/api';
 import { useAlert } from '../../src/context/AlertContext';
 // 🌍 IMPORTACIÓN DEL MOTOR DE IDIOMAS
 import { useLanguage } from '../../src/context/LanguageContext';
@@ -150,16 +150,20 @@ export default function InsightsScreen() {
             await Audio.setAudioModeAsync({ playsInSilentModeIOS: true, staysActiveInBackground: true, shouldDuckAndroid: true });
 
             let uri = '';
+            let headers: Record<string, string> | undefined;
             if (audioData.startsWith('http')) {
                 uri = audioData;
             } else if (audioData.startsWith('/')) {
                 uri = `${API_URL}${audioData}`;
+                // Día 10: el audio del backend es solo de quien lo pidió; sin el token responde 401.
+                const token = await getAuthToken();
+                if (token) headers = { Authorization: `Bearer ${token}` };
             } else {
                 uri = FileSystem.cacheDirectory + 'alice_voice.mp3';
                 await FileSystem.writeAsStringAsync(uri, audioData, { encoding: 'base64' });
             }
 
-            const { sound: newSound } = await Audio.Sound.createAsync({ uri }, { shouldPlay: true });
+            const { sound: newSound } = await Audio.Sound.createAsync({ uri, headers }, { shouldPlay: true });
             soundRef.current = newSound;
             setIsPlaying(true);
 
