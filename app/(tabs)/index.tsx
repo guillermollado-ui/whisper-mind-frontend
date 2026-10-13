@@ -740,6 +740,8 @@ export default function NexusScreen() {
       }
     } else if (data.text) {
       // Día 10: sin caracteres de voz neural este mes (tts:"device") la respuesta llega sin audio; al menos se lee.
+      // En sleep no hay cuento que la cierre: se para ya la música de fondo para que no suene toda la noche.
+      if (mode === 'sleep') await stopSpeaking();
       setSilentResponse({ text: data.text, audioUrl: null });
     }
   };
