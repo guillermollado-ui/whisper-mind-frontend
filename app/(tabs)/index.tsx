@@ -158,6 +158,8 @@ export default function NexusScreen() {
   // Día 9: la imagen llega después de la respuesta; se pregunta por ella hasta 60 s.
   const [imagePending, setImagePending] = useState(false);
   const esperaImagenRef = useRef(0);
+  // Sin imagen hoy (plan o cupo diario): la tarjeta lo explica en vez de un hueco vacío.
+  const [imageLimit, setImageLimit] = useState<null | { upgrade: boolean }>(null);
 
   const recordingModeRef = useRef('default');
   const recordingStartTimeRef = useRef<number>(0);
@@ -718,6 +720,12 @@ export default function NexusScreen() {
       } else {
         cancelarEsperaImagen();
       }
+      if (!imgSource && data.image_status === 'limit_reached') {
+        setPreviewImage(null);
+        setImageLimit({ upgrade: !!data.image_upgrade });
+      } else {
+        setImageLimit(null);
+      }
       // ✅ NUEVO: Eliminamos la restricción del modo. Si Alice envía una propuesta de vibración, mostramos el modal.
       if (data.proposed_vibration && !hayAyuda) {
         setTimeout(() => setShowVibrationModal(true), 1500);
@@ -1142,6 +1150,29 @@ export default function NexusScreen() {
                   <Text style={{ color: '#64748B', fontSize: 11, marginTop: 10, letterSpacing: 1 }}>
                     {language === 'es' ? 'Creando tu imagen…' : 'Creating your image…'}
                   </Text>
+                </View>
+              ) : imageLimit ? (
+                <View style={{flex:1, justifyContent:'center', alignItems:'center', paddingHorizontal: 24}}>
+                  <Ionicons name="moon-outline" size={28} color="#38BDF8" />
+                  <Text style={{ color: '#CBD5E1', fontSize: 13, textAlign: 'center', marginTop: 10, lineHeight: 19 }}>
+                    {imageLimit.upgrade
+                      ? (language === 'es'
+                          ? 'Tu plan gratuito no incluye imágenes. Suscríbete para crear la imagen de tus sueños y de tu diario.'
+                          : 'Your free plan does not include images. Subscribe to create images for your dreams and your journal.')
+                      : (language === 'es'
+                          ? 'Ya has creado tu imagen de hoy. Mañana podrás crear otra.'
+                          : "You have already created today's image. You can create another one tomorrow.")}
+                  </Text>
+                  {imageLimit.upgrade && (
+                    <TouchableOpacity
+                      style={{ marginTop: 12, paddingVertical: 8, paddingHorizontal: 16, borderRadius: 16, borderWidth: 1, borderColor: '#38BDF8' }}
+                      onPress={() => { setShowVibrationModal(false); setImageLimit(null); router.push('/subscription'); }}
+                    >
+                      <Text style={{ color: '#38BDF8', fontSize: 11, fontWeight: 'bold', letterSpacing: 1 }}>
+                        {language === 'es' ? 'VER PLANES' : 'SEE PLANS'}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
                 </View>
               ) : (
                 <View style={{flex:1, justifyContent:'center', alignItems:'center'}}>
