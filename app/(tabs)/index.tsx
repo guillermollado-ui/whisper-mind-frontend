@@ -55,6 +55,10 @@ const SLEEP_TRACK_URL = 'https://res.cloudinary.com/dtqehosg3/video/upload/e_vol
 // Día 11: la biblioteca de sleep llega con la URL absoluta de R2; el resto, con una ruta del backend.
 const urlAudio = (u: string) => (u.startsWith('http') ? u : `${API_URL}${u}`);
 
+// Día 11: sleep solo se pide con la luna (activateSleepRitual). Lo que se graba o se escribe durante
+// el ritual va como compañera: si no, el backend respondería con otra historia.
+const modoDeEnvio = (id: string) => (id === 'sleep' ? 'default' : id);
+
 const MODES = [
   { id: 'default', color: '#38BDF8' },
   { id: 'calm', color: '#10B981' },
@@ -417,6 +421,9 @@ export default function NexusScreen() {
     vozRef.current++;
     try { await Speech.stop(); } catch { /* sin motor de voz: nada que parar */ }
     setAiSpeaking(false);
+    // Día 11: el ritual de la luna termina cuando para su audio (al acabar la historia o al pararlo):
+    // se vuelve al modo compañera.
+    setCurrentMode((m) => (m.id === 'sleep' ? MODES[0] : m));
   };
 
   useEffect(() => {
@@ -539,7 +546,7 @@ export default function NexusScreen() {
   async function startRecording(modeOverride: string | null = null) {
     if (aiSpeaking) await stopSpeaking();
     setSilentResponse(null);
-    recordingModeRef.current = modeOverride || currentMode.id;
+    recordingModeRef.current = modeOverride || modoDeEnvio(currentMode.id);
     recordingStartTimeRef.current = Date.now();
     try {
       await Audio.setAudioModeAsync({ 
@@ -653,10 +660,10 @@ export default function NexusScreen() {
       const res = await apiFetch('/chat/text', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: textToSend, mode: currentMode.id, language: language, speed: aliceSpeed })
+        body: JSON.stringify({ text: textToSend, mode: modoDeEnvio(currentMode.id), language: language, speed: aliceSpeed })
       });
       const data = await res.json();
-      handleBackendResponse(data, res, currentMode.id, false);
+      handleBackendResponse(data, res, modoDeEnvio(currentMode.id), false);
     } catch (e: any) {
       setAiThinking(false);
       if (e.message === 'SESSION_EXPIRED') handleNetworkError();
