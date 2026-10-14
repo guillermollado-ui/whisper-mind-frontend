@@ -22,6 +22,7 @@ import {
   Linking
 } from 'react-native';
 import { Audio } from 'expo-av';
+import * as Speech from 'expo-speech';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Notifications from 'expo-notifications';
@@ -36,6 +37,7 @@ import * as Localization from 'expo-localization';
 // ✅ NUEVO: Importación del SDK de RevenueCat
 import Purchases from 'react-native-purchases';
 import { API_URL, apiFetch, getAuthToken } from '../../utils/api';
+import { ESPERA_MOTOR_VOZ_MS, GRABACION_VOZ, INICIO_VOZ_MS, idiomaVoz, motorDeVozListo, textoParaVoz } from '../../utils/voz';
 import { useAlert } from '../../src/context/AlertContext'; 
 import { useLanguage } from '../../src/context/LanguageContext';
 import { useGodMode } from '../../src/context/GodModeContext'; // ✅ INYECTADO: El cerebro del Modo Dios
@@ -49,6 +51,9 @@ const ORB_IMAGE = require('@/assets/images/nexus_orb.png');
 
 // ✅ LA LLUVIA ORIGINAL: e_volume:-95 (Tu configuración funcional)
 const SLEEP_TRACK_URL = 'https://res.cloudinary.com/dtqehosg3/video/upload/e_volume:-85/v1771435100/nature_rain_1_edbhvz.mp3';
+
+// Día 11: la biblioteca de sleep llega con la URL absoluta de R2; el resto, con una ruta del backend.
+const urlAudio = (u: string) => (u.startsWith('http') ? u : `${API_URL}${u}`);
 
 const MODES = [
   { id: 'default', color: '#38BDF8' },
@@ -179,6 +184,8 @@ export default function NexusScreen() {
   const soundRef = useRef<Audio.Sound | null>(null);
   const thinkingSoundRef = useRef<Audio.Sound | null>(null);
   const bgSoundRef = useRef<Audio.Sound | null>(null);
+  // Día 11: lectura en curso con la voz del dispositivo; al pararla, sus avisos se ignoran.
+  const vozRef = useRef(0);
   
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const flashFadeAnim = useRef(new Animated.Value(0)).current;
@@ -373,6 +380,9 @@ export default function NexusScreen() {
     return () => { if (thinkingSoundRef.current) thinkingSoundRef.current.unloadAsync(); };
   }, []);
 
+  // Día 11: el motor de voz de Android se arranca ya, para que la primera lectura no espere a que arranque.
+  useEffect(() => { motorDeVozListo(); }, []);
+
   useFocusEffect(useCallback(() => { return () => { stopSpeaking(); }; }, []));
 
   // Antes de llamar: que Alice deje de hablar (y no vuelva a sonar al colgar).
@@ -383,6 +393,13 @@ export default function NexusScreen() {
         language === 'es' ? 'Este dispositivo no puede abrirlo. Marca el número desde un teléfono.' : 'This device cannot open it. Dial the number from a phone.',
         'warning');
     });
+  };
+
+  // Día 11: corta la voz del dispositivo e invalida los avisos (onDone/onError) de esa lectura.
+  const pararVozDispositivo = async () => {
+    const id = ++vozRef.current;
+    try { await Speech.stop(); } catch { /* sin motor de voz: nada que parar */ }
+    return id;
   };
 
   const stopSpeaking = async () => {
@@ -396,6 +413,9 @@ export default function NexusScreen() {
       bgSoundRef.current = null;
     }
     
+    // Día 11: también la voz del dispositivo; los avisos de esa lectura dejan de contar.
+    vozRef.current++;
+    try { await Speech.stop(); } catch { /* sin motor de voz: nada que parar */ }
     setAiSpeaking(false);
   };
 
@@ -529,7 +549,7 @@ export default function NexusScreen() {
           shouldDuckAndroid: true,
           playThroughEarpieceAndroid: false
       });
-      const { recording } = await Audio.Recording.createAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
+      const { recording } = await Audio.Recording.createAsync(GRABACION_VOZ);
       setRecording(recording);
       setIsRecording(true);
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -693,7 +713,9 @@ export default function NexusScreen() {
     }
 
     if (data.limit_reached) {
-        if (data.audio_url) await playStream(`${API_URL}${data.audio_url}`, null);
+        if (data.audio_url) await playStream(urlAudio(data.audio_url), null);
+        // Día 11: un límite sin audio (mode_locked) al menos se ve, ya en el idioma del usuario.
+        else if (data.text && !hayAyuda) setSilentResponse({ text: data.text, audioUrl: null });
         if (!hayAyuda) setTimeout(() => router.push('/subscription'), 2500); 
         return; 
     }
@@ -734,15 +756,16 @@ export default function NexusScreen() {
 
     if (data.audio_url) {
       if (autoPlay) {
-          await playStream(`${API_URL}${data.audio_url}`, onAudioComplete);
+          await playStream(urlAudio(data.audio_url), onAudioComplete);
       } else {
-          setSilentResponse({ text: data.text || (language === 'es' ? "Te escucho." : "I hear you."), audioUrl: `${API_URL}${data.audio_url}` });
+          setSilentResponse({ text: data.text || (language === 'es' ? "Te escucho." : "I hear you."), audioUrl: urlAudio(data.audio_url) });
       }
     } else if (data.text) {
       // Día 10: sin caracteres de voz neural este mes (tts:"device") la respuesta llega sin audio; al menos se lee.
-      // En sleep no hay cuento que la cierre: se para ya la música de fondo para que no suene toda la noche.
-      if (mode === 'sleep') await stopSpeaking();
+      // Día 11: y se oye con la voz del dispositivo. En autoplay avisa a onAudioComplete (flash) y, al
+      // terminar, para la música de sleep igual que el cuento neural.
       setSilentResponse({ text: data.text, audioUrl: null });
+      if (autoPlay) await speakDevice(data.text, onAudioComplete);
     }
   };
 
@@ -750,9 +773,11 @@ export default function NexusScreen() {
     try {
       if (thinkingSoundRef.current) await thinkingSoundRef.current.stopAsync();
       if (soundRef.current) await soundRef.current.unloadAsync();
+      await pararVozDispositivo();
       
       // Día 10: el audio es solo de quien lo pidió; sin el token, el backend responde 401.
-      const token = await getAuthToken();
+      // Día 11: el token solo va al backend; a R2 (biblioteca) o a otro host, nunca.
+      const token = url.startsWith(`${API_URL}/`) ? await getAuthToken() : null;
       const { sound } = await Audio.Sound.createAsync(
         { uri: url, headers: token ? { Authorization: `Bearer ${token}` } : undefined },
         { shouldPlay: true, volume: 1.0 });
@@ -768,6 +793,43 @@ export default function NexusScreen() {
     } catch (e) { 
         setAiSpeaking(false);
         if (onComplete) onComplete();
+    }
+  };
+
+  // Día 11: voz del dispositivo (expo-speech) cuando la respuesta llega sin audio (tts:"device").
+  // Funciona sin red. Como playStream: al terminar para la respuesta (y en sleep la lluvia) y avisa a onComplete.
+  const speakDevice = async (texto: string, onComplete: (() => void) | null) => {
+    try { if (thinkingSoundRef.current) await thinkingSoundRef.current.stopAsync(); } catch {}
+    if (soundRef.current) {
+      try { await soundRef.current.stopAsync(); await soundRef.current.unloadAsync(); } catch {}
+      soundRef.current = null;
+    }
+    const id = await pararVozDispositivo();
+    let plazo: ReturnType<typeof setTimeout> | null = null;
+    const terminar = () => {
+      if (plazo) clearTimeout(plazo);
+      if (vozRef.current !== id) return; // otra lectura o un stop ya la sustituyó
+      stopSpeaking();
+      if (onComplete) onComplete();
+    };
+    if (vozRef.current !== id) return; // se paró mientras se preparaba
+    const limpio = textoParaVoz(texto);
+    if (!limpio) { terminar(); return; }
+    setAiSpeaking(true);
+    // Android: con el motor sin arrancar, la lectura no se podría parar ni avisaría al acabar.
+    // Si no está listo a tiempo, solo queda el texto (y en sleep se para la lluvia, como al acabar).
+    const listo = await motorDeVozListo(ESPERA_MOTOR_VOZ_MS);
+    if (vozRef.current !== id) return; // se paró mientras esperaba al motor
+    if (!listo) { terminar(); return; }
+    // Plazo de seguridad: si no empieza a leer (motor caído), se da por terminada.
+    let empezo = false;
+    plazo = setTimeout(() => { if (!empezo) terminar(); }, INICIO_VOZ_MS);
+    try {
+      // Android encola las lecturas: por eso antes se para la anterior.
+      Speech.speak(limpio, { language: idiomaVoz(language), rate: aliceSpeed,
+        onStart: () => { empezo = true; }, onDone: terminar, onError: terminar });
+    } catch {
+      terminar();
     }
   };
 
@@ -992,17 +1054,18 @@ export default function NexusScreen() {
                 >
                   <Text style={styles.silentText}>"{silentResponse.text}"</Text>
                 </ScrollView>
-                {silentResponse.audioUrl && (
-                  <TouchableOpacity
-                    style={[styles.playButtonMini, {borderColor: currentMode.color, marginTop: 15}]}
-                    onPress={() => playStream(silentResponse.audioUrl!, null)}
-                  >
-                    <Ionicons name={aiSpeaking ? "pause" : "play"} size={14} color={currentMode.color} />
-                    <Text style={[styles.playButtonText, {color: currentMode.color}]}>
-                        {aiSpeaking ? (language === 'es' ? "ESCUCHANDO..." : "LISTENING...") : (language === 'es' ? "ESCUCHAR" : "LISTEN")}
-                    </Text>
-                  </TouchableOpacity>
-                )}
+                {/* Día 11: sin audioUrl (tts:"device") se escucha con la voz del dispositivo, también sin red.
+                    Mientras habla, el botón (icono de pausa) la para: con la tarjeta no se ve el stop de abajo. */}
+                <TouchableOpacity
+                  style={[styles.playButtonMini, {borderColor: currentMode.color, marginTop: 15}]}
+                  onPress={() => aiSpeaking ? stopSpeaking()
+                    : (silentResponse.audioUrl ? playStream(silentResponse.audioUrl, null) : speakDevice(silentResponse.text, null))}
+                >
+                  <Ionicons name={aiSpeaking ? "pause" : "play"} size={14} color={currentMode.color} />
+                  <Text style={[styles.playButtonText, {color: currentMode.color}]}>
+                      {aiSpeaking ? (language === 'es' ? "ESCUCHANDO..." : "LISTENING...") : (language === 'es' ? "ESCUCHAR" : "LISTEN")}
+                  </Text>
+                </TouchableOpacity>
               </View>
             ) : (
               <Text style={styles.statusText}>

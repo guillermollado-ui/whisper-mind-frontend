@@ -8,8 +8,10 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Audio } from 'expo-av';
+import * as Speech from 'expo-speech';
 import * as SecureStore from 'expo-secure-store';
 import { API_URL, apiFetch } from '../utils/api'; 
+import { ESPERA_MOTOR_VOZ_MS, GRABACION_VOZ, idiomaVoz, motorDeVozListo, textoParaVoz } from '../utils/voz';
 // 🌍 IMPORTACIÓN DEL MOTOR DE IDIOMAS
 import { useLanguage } from '../src/context/LanguageContext';
 
@@ -57,6 +59,13 @@ export default function OnboardingScreen() {
     };
   }, [welcomeSound]);
 
+  // Día 11: la bienvenida leída con la voz del dispositivo tampoco sigue sonando al salir. En Android
+  // el motor de voz se arranca ya: con él sin arrancar, Speech.stop() no cortaría esa lectura.
+  useEffect(() => {
+    motorDeVozListo();
+    return () => { Speech.stop().catch(() => {}); };
+  }, []);
+
   const finishOnboarding = async () => {
     setLoading(true);
     try {
@@ -92,6 +101,7 @@ export default function OnboardingScreen() {
 
       if (response.ok) {
         const data = await response.json();
+        const mensaje = data.message || (language === 'es' ? 'Bienvenido a Whisper Mind.' : 'Welcome to Whisper Mind.');
 
         if (data.audio_base64) {
           try {
@@ -118,9 +128,21 @@ export default function OnboardingScreen() {
           } catch (audioErr) {
             console.log('Welcome audio playback error:', audioErr);
           }
+        } else {
+          // Día 11: sin audio neural (falló el TTS) la bienvenida se lee con la voz del dispositivo.
+          try {
+            await Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true });
+            await Speech.stop();
+            // Sin esperar: con el motor de Android sin arrancar a tiempo, la bienvenida queda solo escrita.
+            motorDeVozListo(ESPERA_MOTOR_VOZ_MS).then((listo) => {
+              if (listo) Speech.speak(textoParaVoz(mensaje), { language: idiomaVoz(language), rate: 1.0 });
+            }).catch((e) => console.log('Welcome device voice error:', e));
+          } catch (speechErr) {
+            console.log('Welcome device voice error:', speechErr);
+          }
         }
 
-        setWelcomeMessage(data.message || (language === 'es' ? 'Bienvenido a Whisper Mind.' : 'Welcome to Whisper Mind.'));
+        setWelcomeMessage(mensaje);
         setLoading(false);
 
         Animated.timing(fadeAnim, { toValue: 0, duration: 300, useNativeDriver: true }).start(() => {
@@ -160,6 +182,7 @@ export default function OnboardingScreen() {
 
   const enterNexus = () => {
     if (welcomeSound) welcomeSound.unloadAsync();
+    Speech.stop().catch(() => {});
     router.replace('/(tabs)');
   };
 
@@ -167,7 +190,7 @@ export default function OnboardingScreen() {
     try {
       recordingStartTimeRef.current = Date.now();
       await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
-      const { recording } = await Audio.Recording.createAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
+      const { recording } = await Audio.Recording.createAsync(GRABACION_VOZ);
       setRecording(recording);
       setIsRecording(true);
     } catch (err) { console.error(err); }
@@ -177,6 +200,9 @@ export default function OnboardingScreen() {
     if (!recording) return;
 
     const duration = Date.now() - recordingStartTimeRef.current;
+    // Día 11: como en index.tsx, el modo de reproducción se pone con la grabadora aún activa. Si no,
+    // en iOS la sesión queda en grabación y la bienvenida con la voz del dispositivo sale por el auricular.
+    try { await Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true }); } catch {}
     if (duration < 1500) { 
         setIsRecording(false);
         try { await recording.stopAndUnloadAsync(); } catch (e) {}
