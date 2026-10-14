@@ -18,9 +18,11 @@ import {
   KeyboardAvoidingView,
   Keyboard,
   ActivityIndicator,
-  Dimensions
+  Dimensions,
+  Linking
 } from 'react-native';
 import { Audio } from 'expo-av';
+import * as Speech from 'expo-speech';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Notifications from 'expo-notifications';
@@ -31,9 +33,11 @@ import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import * as LocalAuthentication from 'expo-local-authentication';
 import * as Haptics from 'expo-haptics';
+import * as Localization from 'expo-localization';
 // ✅ NUEVO: Importación del SDK de RevenueCat
 import Purchases from 'react-native-purchases';
-import { API_URL, apiFetch } from '../../utils/api';
+import { API_URL, apiFetch, getAuthToken } from '../../utils/api';
+import { ESPERA_MOTOR_VOZ_MS, GRABACION_VOZ, INICIO_VOZ_MS, idiomaVoz, motorDeVozListo, textoParaVoz } from '../../utils/voz';
 import { useAlert } from '../../src/context/AlertContext'; 
 import { useLanguage } from '../../src/context/LanguageContext';
 import { useGodMode } from '../../src/context/GodModeContext'; // ✅ INYECTADO: El cerebro del Modo Dios
@@ -48,6 +52,13 @@ const ORB_IMAGE = require('@/assets/images/nexus_orb.png');
 // ✅ LA LLUVIA ORIGINAL: e_volume:-95 (Tu configuración funcional)
 const SLEEP_TRACK_URL = 'https://res.cloudinary.com/dtqehosg3/video/upload/e_volume:-85/v1771435100/nature_rain_1_edbhvz.mp3';
 
+// Día 11: la biblioteca de sleep llega con la URL absoluta de R2; el resto, con una ruta del backend.
+const urlAudio = (u: string) => (u.startsWith('http') ? u : `${API_URL}${u}`);
+
+// Día 11: sleep solo se pide con la luna (activateSleepRitual). Lo que se graba o se escribe durante
+// el ritual va como compañera: si no, el backend respondería con otra historia.
+const modoDeEnvio = (id: string) => (id === 'sleep' ? 'default' : id);
+
 const MODES = [
   { id: 'default', color: '#38BDF8' },
   { id: 'calm', color: '#10B981' },
@@ -56,6 +67,53 @@ const MODES = [
 ];
 
 const SLEEP_COLOR = '#8B5CF6';
+
+// Recursos de ayuda por región del dispositivo. Se eligen aquí y no por el texto:
+// un usuario de México que escribe en español no puede recibir números de España.
+// Los de España y EE. UU. coinciden con safety.py del backend.
+type RecursoAyuda = { nombre: string; descripcion: string; telefono?: string; sms?: string; url?: string };
+const RECURSOS_AYUDA: Record<'ES' | 'ES_OTROS' | 'US' | 'EN_OTROS' | 'GB' | 'MX', RecursoAyuda[]> = {
+  ES: [
+    { nombre: 'Línea 024', descripcion: 'Atención a la conducta suicida. Gratis, 24 horas.', telefono: '024' },
+    { nombre: 'Emergencias', descripcion: 'Si estás en peligro ahora mismo.', telefono: '112' },
+    { nombre: '016', descripcion: 'Violencia contra las mujeres (pareja, sexual, acoso). Gratis, 24 horas.', telefono: '016' },
+    { nombre: '016 por WhatsApp', descripcion: 'Si no puedes hablar en voz alta.', url: 'https://wa.me/34600000016' },
+    { nombre: 'Fundación ANAR', descripcion: 'Si eres menor de edad. Gratis, 24 horas.', telefono: '900202010' },
+  ],
+  ES_OTROS: [
+    { nombre: 'Línea de ayuda de tu país', descripcion: 'Busca el teléfono gratuito de tu país en findahelpline.com.', url: 'https://findahelpline.com/es-419' },
+    { nombre: 'Emergencias', descripcion: 'Si estás en peligro ahora mismo, llama al número de emergencias de tu país.' },
+  ],
+  US: [
+    { nombre: '988 Lifeline', descripcion: 'Call or text, free, 24/7. En español: opción 2 o envía AYUDA.', telefono: '988', sms: '988' },
+    { nombre: 'Emergency', descripcion: 'If you are in danger right now.', telefono: '911' },
+    { nombre: 'Domestic Violence Hotline', descripcion: 'If someone is hurting you. Free, 24/7.', telefono: '18007997233' },
+  ],
+  GB: [
+    { nombre: 'Samaritans', descripcion: 'Free, 24/7. Call 116 123.', telefono: '116123' },
+    { nombre: 'Emergency', descripcion: 'If you are in danger right now.', telefono: '999' },
+    { nombre: 'Find a helpline', descripcion: 'More helplines: findahelpline.com', url: 'https://findahelpline.com' },
+  ],
+  MX: [
+    { nombre: 'Línea de la Vida', descripcion: 'Gratis, 24 horas, en todo México.', telefono: '8009112000' },
+    { nombre: 'Emergencias', descripcion: 'Si estás en peligro ahora mismo.', telefono: '911' },
+    { nombre: 'Otras líneas', descripcion: 'Más teléfonos de ayuda: findahelpline.com', url: 'https://findahelpline.com/es-419' },
+  ],
+  EN_OTROS: [
+    { nombre: 'Find a helpline', descripcion: 'Free helplines in your country: findahelpline.com', url: 'https://findahelpline.com' },
+    { nombre: 'Emergency', descripcion: 'If you are in danger right now, call your local emergency number.' },
+  ],
+};
+
+const recursosPorRegion = (language: string): RecursoAyuda[] => {
+  let region = '';
+  try { region = (Localization.getLocales()[0]?.regionCode || '').toUpperCase(); } catch { /* sin región: lista internacional */ }
+  if (region === 'ES') return RECURSOS_AYUDA.ES;
+  if (region === 'US' || region === 'CA') return RECURSOS_AYUDA.US;
+  if (region === 'GB' || region === 'IE') return RECURSOS_AYUDA.GB;
+  if (region === 'MX') return RECURSOS_AYUDA.MX;
+  return language === 'es' ? RECURSOS_AYUDA.ES_OTROS : RECURSOS_AYUDA.EN_OTROS;
+};
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -106,11 +164,17 @@ export default function NexusScreen() {
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [showVibrationModal, setShowVibrationModal] = useState(false);
   const [isPublishing, setIsPublishing] = useState(false);
+  // Día 9: la imagen llega después de la respuesta; se pregunta por ella hasta 60 s.
+  const [imagePending, setImagePending] = useState(false);
+  const esperaImagenRef = useRef(0);
+  // Sin imagen hoy (plan o cupo diario): la tarjeta lo explica en vez de un hueco vacío.
+  const [imageLimit, setImageLimit] = useState<null | { upgrade: boolean }>(null);
 
   const recordingModeRef = useRef('default');
   const recordingStartTimeRef = useRef<number>(0);
 
   const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [ayuda, setAyuda] = useState<{ texto?: string } | null>(null);
   const [biometricsEnabled, setBiometricsEnabled] = useState(false);
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [userStatus, setUserStatus] = useState({ username: '', role: 'free', is_founder: false });
@@ -124,6 +188,8 @@ export default function NexusScreen() {
   const soundRef = useRef<Audio.Sound | null>(null);
   const thinkingSoundRef = useRef<Audio.Sound | null>(null);
   const bgSoundRef = useRef<Audio.Sound | null>(null);
+  // Día 11: lectura en curso con la voz del dispositivo; al pararla, sus avisos se ignoran.
+  const vozRef = useRef(0);
   
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const flashFadeAnim = useRef(new Animated.Value(0)).current;
@@ -318,7 +384,27 @@ export default function NexusScreen() {
     return () => { if (thinkingSoundRef.current) thinkingSoundRef.current.unloadAsync(); };
   }, []);
 
+  // Día 11: el motor de voz de Android se arranca ya, para que la primera lectura no espere a que arranque.
+  useEffect(() => { motorDeVozListo(); }, []);
+
   useFocusEffect(useCallback(() => { return () => { stopSpeaking(); }; }, []));
+
+  // Antes de llamar: que Alice deje de hablar (y no vuelva a sonar al colgar).
+  const abrirAyuda = async (url: string) => {
+    await stopSpeaking();
+    Linking.openURL(url).catch(() => {
+      showAlert(language === 'es' ? 'NO DISPONIBLE' : 'NOT AVAILABLE',
+        language === 'es' ? 'Este dispositivo no puede abrirlo. Marca el número desde un teléfono.' : 'This device cannot open it. Dial the number from a phone.',
+        'warning');
+    });
+  };
+
+  // Día 11: corta la voz del dispositivo e invalida los avisos (onDone/onError) de esa lectura.
+  const pararVozDispositivo = async () => {
+    const id = ++vozRef.current;
+    try { await Speech.stop(); } catch { /* sin motor de voz: nada que parar */ }
+    return id;
+  };
 
   const stopSpeaking = async () => {
     if (soundRef.current) {
@@ -331,7 +417,13 @@ export default function NexusScreen() {
       bgSoundRef.current = null;
     }
     
+    // Día 11: también la voz del dispositivo; los avisos de esa lectura dejan de contar.
+    vozRef.current++;
+    try { await Speech.stop(); } catch { /* sin motor de voz: nada que parar */ }
     setAiSpeaking(false);
+    // Día 11: el ritual de la luna termina cuando para su audio (al acabar la historia o al pararlo):
+    // se vuelve al modo compañera.
+    setCurrentMode((m) => (m.id === 'sleep' ? MODES[0] : m));
   };
 
   useEffect(() => {
@@ -433,10 +525,17 @@ export default function NexusScreen() {
         body: JSON.stringify(payload)
       });
       if (res.ok) {
-        showAlert("OFFERING ACCEPTED", "Your essence is now resonating.", "success");
+        const data = await res.json().catch(() => ({}));
         setProposedVibration(null);
         setPreviewImage(null);
+        cancelarEsperaImagen();
         setShowVibrationModal(false);
+        if (data && data.crisis) {
+          // El backend no publica y devuelve ayuda: nada de "aceptado".
+          setAyuda({ texto: data.text });
+        } else {
+          showAlert("OFFERING ACCEPTED", "Your essence is now resonating.", "success");
+        }
       } else { throw new Error("Failed"); }
     } catch (e: any) {
       if (e.message === 'SESSION_EXPIRED') return;
@@ -447,7 +546,7 @@ export default function NexusScreen() {
   async function startRecording(modeOverride: string | null = null) {
     if (aiSpeaking) await stopSpeaking();
     setSilentResponse(null);
-    recordingModeRef.current = modeOverride || currentMode.id;
+    recordingModeRef.current = modeOverride || modoDeEnvio(currentMode.id);
     recordingStartTimeRef.current = Date.now();
     try {
       await Audio.setAudioModeAsync({ 
@@ -457,7 +556,7 @@ export default function NexusScreen() {
           shouldDuckAndroid: true,
           playThroughEarpieceAndroid: false
       });
-      const { recording } = await Audio.Recording.createAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
+      const { recording } = await Audio.Recording.createAsync(GRABACION_VOZ);
       setRecording(recording);
       setIsRecording(true);
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -561,14 +660,51 @@ export default function NexusScreen() {
       const res = await apiFetch('/chat/text', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: textToSend, mode: currentMode.id, language: language, speed: aliceSpeed })
+        body: JSON.stringify({ text: textToSend, mode: modoDeEnvio(currentMode.id), language: language, speed: aliceSpeed })
       });
       const data = await res.json();
-      handleBackendResponse(data, res, currentMode.id, false);
+      handleBackendResponse(data, res, modoDeEnvio(currentMode.id), false);
     } catch (e: any) {
       setAiThinking(false);
       if (e.message === 'SESSION_EXPIRED') handleNetworkError();
     }
+  };
+
+  // Pregunta por la imagen cada 1,5 s durante 60 s como mucho: el peor caso del backend
+  // (moderación, proveedores con su reintento y subida) pasa de los 40 s. Una respuesta
+  // nueva, descartar la tarjeta o publicar invalidan la espera anterior.
+  const esperarImagen = async (vaultId: string) => {
+    const id = ++esperaImagenRef.current;
+    setImagePending(true);
+    const limite = Date.now() + 60000;
+    try {
+      while (Date.now() < limite) {
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        if (esperaImagenRef.current !== id) return;
+        try {
+          const res = await apiFetch(`/image/${encodeURIComponent(vaultId)}`);
+          if (res.status === 404) return;
+          if (!res.ok) continue;
+          const estado = await res.json();
+          if (esperaImagenRef.current !== id) return;
+          if (estado.status === 'ready' && estado.url) {
+            setPreviewImage(estado.url);
+            setProposedVibration((v: any) => (v && v.vault_id === vaultId ? { ...v, existing_image_url: estado.url } : v));
+            return;
+          }
+          if (estado.status === 'failed') return;
+        } catch (e: any) {
+          if (e.message === 'SESSION_EXPIRED') return;
+        }
+      }
+    } finally {
+      if (esperaImagenRef.current === id) setImagePending(false);
+    }
+  };
+
+  const cancelarEsperaImagen = () => {
+    esperaImagenRef.current++;
+    setImagePending(false);
   };
 
   const handleBackendResponse = async (data: any, res: any, mode: string, autoPlay: boolean, onAudioComplete: (() => void) | null = null) => {
@@ -576,9 +712,18 @@ export default function NexusScreen() {
     setAiThinking(false);
     if (!res.ok) throw new Error(data.detail || "Server error");
     
+    // Protocolo de crisis: los recursos de ayuda se ven siempre, también en modo voz
+    // y aunque se haya agotado el cupo. Con ayuda abierta no hay muro de pago ni tarjeta encima.
+    const hayAyuda = Array.isArray(data.recursos) && data.recursos.length > 0;
+    if (hayAyuda) {
+      setAyuda({ texto: data.aviso || (data.crisis ? data.text : undefined) });
+    }
+
     if (data.limit_reached) {
-        if (data.audio_url) await playStream(`${API_URL}${data.audio_url}`, null);
-        setTimeout(() => router.push('/subscription'), 2500); 
+        if (data.audio_url) await playStream(urlAudio(data.audio_url), null);
+        // Día 11: un límite sin audio (mode_locked) al menos se ve, ya en el idioma del usuario.
+        else if (data.text && !hayAyuda) setSilentResponse({ text: data.text, audioUrl: null });
+        if (!hayAyuda) setTimeout(() => router.push('/subscription'), 2500); 
         return; 
     }
 
@@ -597,18 +742,37 @@ export default function NexusScreen() {
       }
       
       setProposedVibration(data.proposed_vibration);
+      // Día 9: la imagen se genera después de la respuesta; mientras, la tarjeta indica que viene.
+      if (!imgSource && data.image_status === 'pending' && data.vault_id) {
+        setPreviewImage(null);
+        esperarImagen(data.vault_id);
+      } else {
+        cancelarEsperaImagen();
+      }
+      if (!imgSource && data.image_status === 'limit_reached') {
+        setPreviewImage(null);
+        setImageLimit({ upgrade: !!data.image_upgrade });
+      } else {
+        setImageLimit(null);
+      }
       // ✅ NUEVO: Eliminamos la restricción del modo. Si Alice envía una propuesta de vibración, mostramos el modal.
-      if (data.proposed_vibration) {
+      if (data.proposed_vibration && !hayAyuda) {
         setTimeout(() => setShowVibrationModal(true), 1500);
       }
     }
 
     if (data.audio_url) {
       if (autoPlay) {
-          await playStream(`${API_URL}${data.audio_url}`, onAudioComplete);
+          await playStream(urlAudio(data.audio_url), onAudioComplete);
       } else {
-          setSilentResponse({ text: data.text || (language === 'es' ? "Te escucho." : "I hear you."), audioUrl: `${API_URL}${data.audio_url}` });
+          setSilentResponse({ text: data.text || (language === 'es' ? "Te escucho." : "I hear you."), audioUrl: urlAudio(data.audio_url) });
       }
+    } else if (data.text) {
+      // Día 10: sin caracteres de voz neural este mes (tts:"device") la respuesta llega sin audio; al menos se lee.
+      // Día 11: y se oye con la voz del dispositivo. En autoplay avisa a onAudioComplete (flash) y, al
+      // terminar, para la música de sleep igual que el cuento neural.
+      setSilentResponse({ text: data.text, audioUrl: null });
+      if (autoPlay) await speakDevice(data.text, onAudioComplete);
     }
   };
 
@@ -616,8 +780,14 @@ export default function NexusScreen() {
     try {
       if (thinkingSoundRef.current) await thinkingSoundRef.current.stopAsync();
       if (soundRef.current) await soundRef.current.unloadAsync();
+      await pararVozDispositivo();
       
-      const { sound } = await Audio.Sound.createAsync({ uri: url }, { shouldPlay: true, volume: 1.0 });
+      // Día 10: el audio es solo de quien lo pidió; sin el token, el backend responde 401.
+      // Día 11: el token solo va al backend; a R2 (biblioteca) o a otro host, nunca.
+      const token = url.startsWith(`${API_URL}/`) ? await getAuthToken() : null;
+      const { sound } = await Audio.Sound.createAsync(
+        { uri: url, headers: token ? { Authorization: `Bearer ${token}` } : undefined },
+        { shouldPlay: true, volume: 1.0 });
       soundRef.current = sound;
       setAiSpeaking(true);
       
@@ -630,6 +800,43 @@ export default function NexusScreen() {
     } catch (e) { 
         setAiSpeaking(false);
         if (onComplete) onComplete();
+    }
+  };
+
+  // Día 11: voz del dispositivo (expo-speech) cuando la respuesta llega sin audio (tts:"device").
+  // Funciona sin red. Como playStream: al terminar para la respuesta (y en sleep la lluvia) y avisa a onComplete.
+  const speakDevice = async (texto: string, onComplete: (() => void) | null) => {
+    try { if (thinkingSoundRef.current) await thinkingSoundRef.current.stopAsync(); } catch {}
+    if (soundRef.current) {
+      try { await soundRef.current.stopAsync(); await soundRef.current.unloadAsync(); } catch {}
+      soundRef.current = null;
+    }
+    const id = await pararVozDispositivo();
+    let plazo: ReturnType<typeof setTimeout> | null = null;
+    const terminar = () => {
+      if (plazo) clearTimeout(plazo);
+      if (vozRef.current !== id) return; // otra lectura o un stop ya la sustituyó
+      stopSpeaking();
+      if (onComplete) onComplete();
+    };
+    if (vozRef.current !== id) return; // se paró mientras se preparaba
+    const limpio = textoParaVoz(texto);
+    if (!limpio) { terminar(); return; }
+    setAiSpeaking(true);
+    // Android: con el motor sin arrancar, la lectura no se podría parar ni avisaría al acabar.
+    // Si no está listo a tiempo, solo queda el texto (y en sleep se para la lluvia, como al acabar).
+    const listo = await motorDeVozListo(ESPERA_MOTOR_VOZ_MS);
+    if (vozRef.current !== id) return; // se paró mientras esperaba al motor
+    if (!listo) { terminar(); return; }
+    // Plazo de seguridad: si no empieza a leer (motor caído), se da por terminada.
+    let empezo = false;
+    plazo = setTimeout(() => { if (!empezo) terminar(); }, INICIO_VOZ_MS);
+    try {
+      // Android encola las lecturas: por eso antes se para la anterior.
+      Speech.speak(limpio, { language: idiomaVoz(language), rate: aliceSpeed,
+        onStart: () => { empezo = true; }, onDone: terminar, onError: terminar });
+    } catch {
+      terminar();
     }
   };
 
@@ -786,7 +993,7 @@ export default function NexusScreen() {
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{flex:1}}>
       
       <View style={styles.headerContainer}>
-        <View>
+        <View style={{ flexShrink: 1 }}>
           {/* ✅ CERRADURA SECRETA: 5 toques en el título para abrir el Modo Dios */}
           <TouchableOpacity activeOpacity={1} onPress={handleGodModeTap}>
             <Text style={styles.title}>{t('nexus.title')}</Text>
@@ -806,6 +1013,9 @@ export default function NexusScreen() {
           </TouchableOpacity>
           <TouchableOpacity onPress={activateDailyRoutine} style={{padding: 5}}>
             <Ionicons name="alarm-outline" size={24} color={currentMode.color} style={{opacity: 0.8}} />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => setAyuda({})} style={{padding: 5}} accessibilityRole="button" accessibilityLabel={language === 'es' ? 'Teléfonos de ayuda' : 'Helplines'}>
+            <Ionicons name="help-buoy-outline" size={24} color="rgba(255,255,255,0.7)" />
           </TouchableOpacity>
           <TouchableOpacity onPress={() => setShowSettingsModal(true)} style={{padding: 5}}>
             <Ionicons name="settings-outline" size={24} color="rgba(255,255,255,0.7)" />
@@ -851,17 +1061,18 @@ export default function NexusScreen() {
                 >
                   <Text style={styles.silentText}>"{silentResponse.text}"</Text>
                 </ScrollView>
-                {silentResponse.audioUrl && (
-                  <TouchableOpacity
-                    style={[styles.playButtonMini, {borderColor: currentMode.color, marginTop: 15}]}
-                    onPress={() => playStream(silentResponse.audioUrl!, null)}
-                  >
-                    <Ionicons name={aiSpeaking ? "pause" : "play"} size={14} color={currentMode.color} />
-                    <Text style={[styles.playButtonText, {color: currentMode.color}]}>
-                        {aiSpeaking ? (language === 'es' ? "ESCUCHANDO..." : "LISTENING...") : (language === 'es' ? "ESCUCHAR" : "LISTEN")}
-                    </Text>
-                  </TouchableOpacity>
-                )}
+                {/* Día 11: sin audioUrl (tts:"device") se escucha con la voz del dispositivo, también sin red.
+                    Mientras habla, el botón (icono de pausa) la para: con la tarjeta no se ve el stop de abajo. */}
+                <TouchableOpacity
+                  style={[styles.playButtonMini, {borderColor: currentMode.color, marginTop: 15}]}
+                  onPress={() => aiSpeaking ? stopSpeaking()
+                    : (silentResponse.audioUrl ? playStream(silentResponse.audioUrl, null) : speakDevice(silentResponse.text, null))}
+                >
+                  <Ionicons name={aiSpeaking ? "pause" : "play"} size={14} color={currentMode.color} />
+                  <Text style={[styles.playButtonText, {color: currentMode.color}]}>
+                      {aiSpeaking ? (language === 'es' ? "ESCUCHANDO..." : "LISTENING...") : (language === 'es' ? "ESCUCHAR" : "LISTEN")}
+                  </Text>
+                </TouchableOpacity>
               </View>
             ) : (
               <Text style={styles.statusText}>
@@ -1012,6 +1223,36 @@ export default function NexusScreen() {
             <View style={{ width: '100%', height: 220, backgroundColor: '#000', justifyContent: 'center', alignItems: 'center' }}>
               {previewImage ? (
                 <Image source={{ uri: previewImage }} style={{ width: '100%', height: '100%', opacity: 0.8 }} resizeMode="cover" />
+              ) : imagePending ? (
+                <View style={{flex:1, justifyContent:'center', alignItems:'center'}}>
+                  <ActivityIndicator color="#38BDF8" />
+                  <Text style={{ color: '#64748B', fontSize: 11, marginTop: 10, letterSpacing: 1 }}>
+                    {language === 'es' ? 'Creando tu imagen…' : 'Creating your image…'}
+                  </Text>
+                </View>
+              ) : imageLimit ? (
+                <View style={{flex:1, justifyContent:'center', alignItems:'center', paddingHorizontal: 24}}>
+                  <Ionicons name="moon-outline" size={28} color="#38BDF8" />
+                  <Text style={{ color: '#CBD5E1', fontSize: 13, textAlign: 'center', marginTop: 10, lineHeight: 19 }}>
+                    {imageLimit.upgrade
+                      ? (language === 'es'
+                          ? 'Tu plan gratuito no incluye imágenes. Suscríbete para crear la imagen de tus sueños y de tu diario.'
+                          : 'Your free plan does not include images. Subscribe to create images for your dreams and your journal.')
+                      : (language === 'es'
+                          ? 'Ya has creado tu imagen de hoy. Mañana podrás crear otra.'
+                          : "You have already created today's image. You can create another one tomorrow.")}
+                  </Text>
+                  {imageLimit.upgrade && (
+                    <TouchableOpacity
+                      style={{ marginTop: 12, paddingVertical: 8, paddingHorizontal: 16, borderRadius: 16, borderWidth: 1, borderColor: '#38BDF8' }}
+                      onPress={() => { setShowVibrationModal(false); setImageLimit(null); router.push('/subscription'); }}
+                    >
+                      <Text style={{ color: '#38BDF8', fontSize: 11, fontWeight: 'bold', letterSpacing: 1 }}>
+                        {language === 'es' ? 'VER PLANES' : 'SEE PLANS'}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
               ) : (
                 <View style={{flex:1, justifyContent:'center', alignItems:'center'}}>
                   <Ionicons name="aperture-outline" size={40} color="#334155" />
@@ -1031,14 +1272,61 @@ export default function NexusScreen() {
               <Text style={{ color: '#38BDF8', fontSize: 9, letterSpacing: 2, marginBottom: 10, fontWeight: 'bold' }}>ESSENCE DISTILLED</Text>
               <Text style={{ color: 'white', fontSize: 16, fontStyle: 'italic', textAlign: 'center', marginBottom: 20, lineHeight: 24, fontWeight: '300' }}>"{proposedVibration?.echo_text}"</Text>
               <View style={{ flexDirection: 'row', gap: 15 }}>
-                <TouchableOpacity style={styles.alertBtnGhost} onPress={() => { setShowVibrationModal(false); setPreviewImage(null); }}>
+                <TouchableOpacity style={styles.alertBtnGhost} onPress={() => { setShowVibrationModal(false); setPreviewImage(null); cancelarEsperaImagen(); }}>
                   <Text style={styles.alertBtnTextGhost}>DISCARD</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={[styles.alertBtn, {backgroundColor: 'rgba(56, 189, 248, 0.1)', borderColor: '#38BDF8'}]} onPress={publishToNetwork} disabled={isPublishing}>
+                <TouchableOpacity style={[styles.alertBtn, {backgroundColor: 'rgba(56, 189, 248, 0.1)', borderColor: '#38BDF8', opacity: imagePending ? 0.5 : 1}]} onPress={publishToNetwork} disabled={isPublishing || imagePending}>
                   <Text style={[styles.alertBtnText, {color: '#38BDF8'}]}>{isPublishing ? "SENDING..." : "RESONATE"}</Text>
                 </TouchableOpacity>
               </View>
             </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={ayuda !== null} transparent={true} animationType="fade" onRequestClose={() => setAyuda(null)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.ayudaCaja}>
+            <Text style={styles.ayudaTitulo} accessibilityRole="header">
+              {language === 'es' ? 'No tienes que pasar por esto a solas' : "You don't have to go through this alone"}
+            </Text>
+            <ScrollView style={{ width: '100%', flexGrow: 0, flexShrink: 1 }}>
+              {ayuda?.texto ? <Text style={styles.ayudaTexto}>{ayuda.texto}</Text> : null}
+              {recursosPorRegion(language).map((r) => (
+                <View key={r.nombre} style={styles.ayudaRecurso}>
+                  <Text style={styles.ayudaNombre}>{r.nombre}</Text>
+                  <Text style={styles.ayudaDescripcion}>{r.descripcion}</Text>
+                  <View style={{ flexDirection: 'row', gap: 10, marginTop: 8, flexWrap: 'wrap' }}>
+                    {r.telefono ? (
+                      <TouchableOpacity style={styles.ayudaBoton} accessibilityRole="button" onPress={() => abrirAyuda(`tel:${r.telefono}`)}>
+                        <Ionicons name="call" size={16} color="#000" />
+                        <Text style={styles.ayudaBotonTexto}>{language === 'es' ? `Llamar al ${r.telefono}` : `Call ${r.telefono}`}</Text>
+                      </TouchableOpacity>
+                    ) : null}
+                    {r.sms ? (
+                      <TouchableOpacity style={styles.ayudaBoton} accessibilityRole="button" onPress={() => abrirAyuda(language === 'es' ? `sms:${r.sms}?body=AYUDA` : `sms:${r.sms}`)}>
+                        <Ionicons name="chatbubble" size={16} color="#000" />
+                        <Text style={styles.ayudaBotonTexto}>{language === 'es' ? 'SMS' : 'Text'}</Text>
+                      </TouchableOpacity>
+                    ) : null}
+                    {r.url ? (
+                      <TouchableOpacity style={styles.ayudaBoton} accessibilityRole="button" onPress={() => abrirAyuda(r.url!)}>
+                        <Ionicons name="open-outline" size={16} color="#000" />
+                        <Text style={styles.ayudaBotonTexto}>{language === 'es' ? 'Abrir' : 'Open'}</Text>
+                      </TouchableOpacity>
+                    ) : null}
+                  </View>
+                </View>
+              ))}
+              <Text style={styles.ayudaAviso}>
+                {language === 'es'
+                  ? 'Alice no sustituye a un profesional ni a los servicios de emergencia.'
+                  : 'Alice is not a substitute for a professional or for emergency services.'}
+              </Text>
+            </ScrollView>
+            <TouchableOpacity onPress={() => setAyuda(null)} style={{ marginTop: 15, padding: 10 }} accessibilityRole="button">
+              <Text style={{ color: '#94A3B8', fontWeight: '600' }}>{language === 'es' ? 'Cerrar' : 'Close'}</Text>
+            </TouchableOpacity>
           </View>
         </View>
       </Modal>
@@ -1175,7 +1463,7 @@ export default function NexusScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#000000' },
   headerContainer: { marginTop: Platform.OS === 'android' ? 60 : 20, paddingHorizontal: 30, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', width: '100%' },
-  iconsRow: { flexDirection: 'row', gap: 15, paddingTop: 5 },
+  iconsRow: { flexDirection: 'row', gap: 8, paddingTop: 5 },
   title: { fontSize: 28, fontWeight: '900', color: 'white', letterSpacing: 6 },
   subtitle: { fontSize: 11, letterSpacing: 2, fontWeight:'700', marginTop: 0 },
   modeIndicator: { width: 6, height: 6, borderRadius: 3 },
@@ -1203,6 +1491,15 @@ const styles = StyleSheet.create({
   playButtonMini: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 8, paddingHorizontal: 15, borderRadius: 20, borderWidth: 1, backgroundColor: 'rgba(0,0,0,0.5)', alignSelf: 'center' },
   playButtonText: { fontSize: 10, fontWeight: 'bold', letterSpacing: 1 },
   modalOverlay: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.9)' },
+  ayudaCaja: { width: '88%', maxHeight: '90%', backgroundColor: '#0F172A', borderRadius: 20, padding: 22, alignItems: 'center', borderWidth: 1, borderColor: '#334155' },
+  ayudaAviso: { color: '#64748B', fontSize: 12, textAlign: 'center', marginTop: 6 },
+  ayudaTitulo: { color: '#fff', fontSize: 18, fontWeight: '700', textAlign: 'center', marginBottom: 10 },
+  ayudaTexto: { color: '#CBD5E1', fontSize: 14, lineHeight: 20, textAlign: 'center', marginBottom: 12 },
+  ayudaRecurso: { backgroundColor: '#1E293B', borderRadius: 14, padding: 14, marginBottom: 10 },
+  ayudaNombre: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  ayudaDescripcion: { color: '#94A3B8', fontSize: 13, marginTop: 2 },
+  ayudaBoton: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#38BDF8', paddingVertical: 8, paddingHorizontal: 14, borderRadius: 20 },
+  ayudaBotonTexto: { color: '#000', fontWeight: '700', fontSize: 13 },
   cyberAlertBox: { width: 320, backgroundColor: '#09090b', padding: 30, borderRadius: 0, alignItems: 'center', borderWidth: 1, shadowColor: '#000', shadowOffset: {width: 0, height: 10}, shadowOpacity: 0.8, shadowRadius: 30 },
   alertBtn: { paddingVertical: 12, paddingHorizontal: 30, borderRadius: 0, borderWidth: 1, borderColor: '#334155' },
   alertBtnText: { color: 'white', fontWeight: 'bold', fontSize: 10, letterSpacing: 1 },

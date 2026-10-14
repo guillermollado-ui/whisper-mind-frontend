@@ -27,6 +27,8 @@ import { API_URL } from '../../utils/api';
 import { useAlert } from '../../src/context/AlertContext';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+// El mismo formato que exige el backend (USERNAME_PATRON).
+const USERNAME_REGEX = /^[a-z0-9_]{3,20}$/;
 
 const validatePassword = (password: string): string | null => {
     if (password.length < 8) return 'Password must be at least 8 characters.';
@@ -82,6 +84,13 @@ export default function RegisterScreen() {
                 body: JSON.stringify({ token: idToken }),
             });
 
+            // Día 17: el login con Google también tiene límite de intentos.
+            if (response.status === 429) {
+              const seconds = parseInt(response.headers.get('Retry-After') || '60', 10);
+              showAlert('SYSTEM OVERLOAD', `Too many attempts. Wait ${seconds}s.`, 'error');
+              return;
+            }
+
             const data = await response.json();
 
             if (!response.ok) {
@@ -126,6 +135,11 @@ export default function RegisterScreen() {
             return;
         }
 
+        if (!USERNAME_REGEX.test(username.toLowerCase().trim())) {
+            showAlert('INVALID ID', 'Username: 3-20 characters, only letters, numbers and _.', 'warning');
+            return;
+        }
+
         if (!EMAIL_REGEX.test(email.trim())) {
             showAlert('INVALID SYNTAX', 'Please enter a valid email address.', 'warning');
             return;
@@ -166,7 +180,8 @@ export default function RegisterScreen() {
             const data = await response.json();
 
             if (!response.ok) {
-                showAlert('PROTOCOL FAILED', data.detail || 'Identity could not be established.', 'error');
+                // Un 422 trae detail como lista de errores: solo se muestra si es texto.
+                showAlert('PROTOCOL FAILED', typeof data.detail === 'string' ? data.detail : 'Identity could not be established.', 'error');
                 return;
             }
 
