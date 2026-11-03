@@ -38,12 +38,11 @@ export default function RootLayout() {
     const initServices = async () => {
       // Configuración de RevenueCat
       if (Platform.OS !== 'web') {
-        // REEMPLAZA: goog_TU_CLAVE_AQUI con tu clave pública de RevenueCat
-        Purchases.configure({ apiKey: "goog_TU_CLAVE_AQUI" });
-        
+        Purchases.configure({ apiKey: "goog_xevpdkJGflmavhXinaOoBBLMGWq" });
+
         // Configuración de Google Sign-In
         GoogleSignin.configure({
-          // webClientId: 'TU_WEB_CLIENT_ID_DE_GOOGLE_CLOUD.apps.googleusercontent.com', 
+          webClientId: '405439242898-9pi71e0nfge6nagoa6usn59nscpvndui.apps.googleusercontent.com',
           offlineAccess: true,
         });
       }
