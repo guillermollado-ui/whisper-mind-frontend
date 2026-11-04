@@ -72,10 +72,11 @@ export default function RootLayout() {
         await Purchases.logIn(userId);
       }
 
-      const inAuthGroup = segments[0] === '(auth)'; 
+      const inAuthGroup = segments[0] === '(auth)';
       const inOnboarding = segments[0] === 'onboarding';
+      const inLegalZone = segments[0] === 'privacy' || segments[0] === 'delete_account';
       const isIndex = segments.length === 0 || segments[0] === 'index';
-      const inPublicZone = inAuthGroup || inOnboarding;
+      const inPublicZone = inAuthGroup || inOnboarding || inLegalZone;
 
       if (ready) {
         if (!token && !inPublicZone) {
