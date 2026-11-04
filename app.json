@@ -26,8 +26,6 @@
       },
       "googleServicesFile": "./google-services.json",
       "permissions": [
-        "android.permission.READ_EXTERNAL_STORAGE",
-        "android.permission.WRITE_EXTERNAL_STORAGE",
         "android.permission.RECORD_AUDIO",
         "android.permission.INTERNET",
         "com.android.vending.BILLING"
