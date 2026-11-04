@@ -162,6 +162,7 @@ export default function NexusScreen() {
   const [proposedVibration, setProposedVibration] = useState<any>(null);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [showVibrationModal, setShowVibrationModal] = useState(false);
+  const [isPublishing, setIsPublishing] = useState(false);
   // Día 9: la imagen llega después de la respuesta; se pregunta por ella hasta 60 s.
   const [imagePending, setImagePending] = useState(false);
   const esperaImagenRef = useRef(0);
@@ -455,6 +456,45 @@ export default function NexusScreen() {
       : "Alice, it's time to sleep. Take me to the sanctuary.";
     
     triggerArtificialDialogue(sleepPrompt, 'sleep');
+  };
+
+  // Network restaurado (2026-11-04). El modal se muestra a cualquier plan (el backend propone
+  // la vibración sin mirar el rol), así que el botón de publicar solo aparece para Plus y
+  // superiores; Free ve un CTA a /subscription en su lugar (igual que el límite de imagen).
+  const publishToNetwork = async () => {
+    if (!proposedVibration) return;
+    setIsPublishing(true);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    try {
+      const payload = {
+        message: proposedVibration.echo_text || proposedVibration.echo || "Essence",
+        image_url: proposedVibration.existing_image_url || previewImage,
+        vault_id: proposedVibration.vault_id
+      };
+      const res = await apiFetch('/vibrations/submit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setProposedVibration(null);
+        setPreviewImage(null);
+        cancelarEsperaImagen();
+        setShowVibrationModal(false);
+        if (data && data.crisis) {
+          // El backend no publica y devuelve ayuda: nada de "aceptado".
+          setAyuda({ texto: data.text });
+        } else {
+          showAlert("OFFERING ACCEPTED", "Your essence is now resonating.", "success");
+        }
+      } else if (res.status === 403) {
+        showAlert("SUBSCRIPTION REQUIRED", "Network publishing requires a Plus subscription.", "warning");
+      } else { throw new Error("Failed"); }
+    } catch (e: any) {
+      if (e.message === 'SESSION_EXPIRED') return;
+      showAlert("CONNECTION LOST", "The Network is unreachable.", "error");
+    } finally { setIsPublishing(false); }
   };
 
   async function startRecording(modeOverride: string | null = null) {
@@ -1153,9 +1193,21 @@ export default function NexusScreen() {
               <Text style={{ color: '#38BDF8', fontSize: 9, letterSpacing: 2, marginBottom: 10, fontWeight: 'bold' }}>ESSENCE DISTILLED</Text>
               <Text style={{ color: 'white', fontSize: 16, fontStyle: 'italic', textAlign: 'center', marginBottom: 20, lineHeight: 24, fontWeight: '300' }}>"{proposedVibration?.echo_text}"</Text>
               <View style={{ flexDirection: 'row', gap: 15 }}>
-                <TouchableOpacity style={[styles.alertBtn, {backgroundColor: 'rgba(56, 189, 248, 0.1)', borderColor: '#38BDF8'}]} onPress={() => { setShowVibrationModal(false); setPreviewImage(null); cancelarEsperaImagen(); }}>
-                  <Text style={[styles.alertBtnText, {color: '#38BDF8'}]}>{language === 'es' ? 'CERRAR' : 'CLOSE'}</Text>
+                <TouchableOpacity style={styles.alertBtnGhost} onPress={() => { setShowVibrationModal(false); setPreviewImage(null); cancelarEsperaImagen(); }}>
+                  <Text style={styles.alertBtnTextGhost}>{language === 'es' ? 'DESCARTAR' : 'DISCARD'}</Text>
                 </TouchableOpacity>
+                {userStatus.role !== 'free' ? (
+                  <TouchableOpacity style={[styles.alertBtn, {backgroundColor: 'rgba(56, 189, 248, 0.1)', borderColor: '#38BDF8', opacity: imagePending ? 0.5 : 1}]} onPress={publishToNetwork} disabled={isPublishing || imagePending}>
+                    <Text style={[styles.alertBtnText, {color: '#38BDF8'}]}>{isPublishing ? "SENDING..." : "RESONATE"}</Text>
+                  </TouchableOpacity>
+                ) : (
+                  <TouchableOpacity
+                    style={[styles.alertBtn, {backgroundColor: 'rgba(245, 158, 11, 0.1)', borderColor: '#F59E0B'}]}
+                    onPress={() => { setShowVibrationModal(false); setPreviewImage(null); cancelarEsperaImagen(); router.push('/subscription'); }}
+                  >
+                    <Text style={[styles.alertBtnText, {color: '#F59E0B'}]}>{language === 'es' ? 'SUSCRÍBETE PARA COMPARTIR' : 'SUBSCRIBE TO SHARE'}</Text>
+                  </TouchableOpacity>
+                )}
               </View>
             </View>
           </View>

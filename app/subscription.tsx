@@ -102,6 +102,7 @@ export default function SubscriptionScreen() {
     "1 imagen generada al día",
     "Biblioteca completa de Sleep e Historia personalizada semanal",
     "Memoria larga, arquetipos, Vault y exportación",
+    "Publicación y resonancia en la Red (Network)",
   ] : [
     "40 messages a day with Alice",
     "Alice's neural voice (up to 60,000 characters/month)",
@@ -109,6 +110,7 @@ export default function SubscriptionScreen() {
     "1 generated image a day",
     "Full Sleep library and a weekly personalized story",
     "Long-term memory, archetypes, Vault and export",
+    "Publishing and resonance on the Network",
   ];
 
   return (

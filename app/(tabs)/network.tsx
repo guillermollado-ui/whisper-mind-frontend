@@ -40,6 +40,9 @@ export default function NetworkScreen() {
  const [feed, setFeed] = useState<any[]>([]);
  const [currentIndex, setCurrentIndex] = useState(0);
  const [loading, setLoading] = useState(true);
+ // Network es una función de Plus (backend devuelve 403 a Free): sin esto, un usuario
+ // gratuito solo veía el mensaje genérico de "feed vacío", sin saber que está bloqueado.
+ const [requiresUpgrade, setRequiresUpgrade] = useState(false);
    
  // ESTADOS DEL RITUAL
  const [headerPulse, setHeaderPulse] = useState(t('network.pulse_phrases')[0]);
@@ -100,19 +103,23 @@ export default function NetworkScreen() {
  const fetchFeed = async () => {
    try {
      setLoading(true);
-     const res = await apiFetch('/vibrations/network'); 
-     
+     const res = await apiFetch('/vibrations/network');
+
      if (res.ok) {
+       setRequiresUpgrade(false);
        const data = await res.json();
        if (Array.isArray(data) && data.length > 0) {
            setFeed(data);
            animateCardEntry();
        } else {
-           setFeed([]); 
+           setFeed([]);
        }
+     } else if (res.status === 403) {
+       setRequiresUpgrade(true);
+       setFeed([]);
      }
-   } catch (e) {
-     console.log("❌ CRITICAL NETWORK ERROR:", e);
+   } catch (e: any) {
+     if (e.message !== 'SESSION_EXPIRED') console.log("❌ CRITICAL NETWORK ERROR:", e);
    } finally {
      setLoading(false);
    }
@@ -285,6 +292,21 @@ export default function NetworkScreen() {
  );
 
  const currentItem = feed && feed.length > 0 ? feed[currentIndex] : null;
+
+ if (requiresUpgrade) return (
+   <View style={styles.container}>
+     <Ionicons name="earth-outline" size={32} color="#38BDF8" style={{marginBottom: 12}} />
+     <Text style={styles.emptyTitle}>
+       {language === 'es' ? 'La Red es una función de Plus' : 'The Network is a Plus feature'}
+     </Text>
+     <Text style={[styles.emptyTitle, {fontSize: 12, marginTop: 10, opacity: 0.5}]}>
+       {language === 'es' ? 'Suscríbete para ver y compartir en la Red.' : 'Subscribe to view and share on the Network.'}
+     </Text>
+     <TouchableOpacity onPress={() => router.push('/subscription')} style={[styles.returnBtn, {backgroundColor: '#38BDF8'}]}>
+       <Text style={[styles.returnText, {color: '#000'}]}>{language === 'es' ? 'VER PLANES' : 'SEE PLANS'}</Text>
+     </TouchableOpacity>
+   </View>
+ );
 
  if (!currentItem) return (
    <View style={styles.container}>

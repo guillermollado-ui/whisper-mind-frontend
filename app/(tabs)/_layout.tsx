@@ -95,12 +95,11 @@ export default function TabLayout() {
         }}
       />
 
-      {/* 4️⃣ NETWORK (Red Global) - 🕵️‍♂️ OCULTO (Día 19, A5): feed social desactivado, se deja el código por si se reactiva */}
+      {/* 4️⃣ NETWORK (Red Global) - restaurada el 2026-11-04 */}
       <Tabs.Screen
         name="network"
         options={{
           title: 'NETWORK',
-          href: null, // 👈 OCULTA LA PESTAÑA SIN BORRAR network.tsx
           tabBarIcon: ({ color, focused }) => (
             <Ionicons 
               name={focused ? "earth" : "earth-outline"} 
