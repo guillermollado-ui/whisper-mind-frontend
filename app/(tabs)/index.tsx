@@ -12,7 +12,6 @@ import {
   StatusBar,
   SafeAreaView,
   Alert,
-  Switch,
   ScrollView,
   TextInput,
   KeyboardAvoidingView,
@@ -29,14 +28,14 @@ import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
 import { useFocusEffect, useRouter } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
-import * as LocalAuthentication from 'expo-local-authentication';
 import * as Haptics from 'expo-haptics';
 import * as Localization from 'expo-localization';
+import Constants from 'expo-constants';
 // ✅ NUEVO: Importación del SDK de RevenueCat
 import Purchases from 'react-native-purchases';
-import { API_URL, apiFetch, getAuthToken } from '../../utils/api';
+import { API_URL, apiFetch, getAuthToken, logoutRequest } from '../../utils/api';
 import { ESPERA_MOTOR_VOZ_MS, GRABACION_VOZ, INICIO_VOZ_MS, idiomaVoz, motorDeVozListo, textoParaVoz } from '../../utils/voz';
 import { useAlert } from '../../src/context/AlertContext'; 
 import { useLanguage } from '../../src/context/LanguageContext';
@@ -120,6 +119,8 @@ Notifications.setNotificationHandler({
     shouldShowAlert: true,
     shouldPlaySound: true,
     shouldSetBadge: false,
+    shouldShowBanner: true,
+    shouldShowList: true,
   }),
 });
 
@@ -148,7 +149,7 @@ export default function NexusScreen() {
   const { language, setLanguage, t } = useLanguage();
   
   // ✅ VARIABLES MODO DIOS RESTAURADAS
-  const { isGodMode, unlockGodMode } = useGodMode();
+  const { isGodMode, unlockGodMode, lockGodMode } = useGodMode();
   const tapCount = useRef(0);
   const tapTimeout = useRef<any>(null);
     
@@ -158,12 +159,9 @@ export default function NexusScreen() {
   const [aiSpeaking, setAiSpeaking] = useState(false);
   const [currentMode, setCurrentMode] = useState(MODES[0]);
 
-  const [currentFlashState, setCurrentFlashState] = useState('none');
-
   const [proposedVibration, setProposedVibration] = useState<any>(null);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [showVibrationModal, setShowVibrationModal] = useState(false);
-  const [isPublishing, setIsPublishing] = useState(false);
   // Día 9: la imagen llega después de la respuesta; se pregunta por ella hasta 60 s.
   const [imagePending, setImagePending] = useState(false);
   const esperaImagenRef = useRef(0);
@@ -175,8 +173,6 @@ export default function NexusScreen() {
 
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [ayuda, setAyuda] = useState<{ texto?: string } | null>(null);
-  const [biometricsEnabled, setBiometricsEnabled] = useState(false);
-  const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [userStatus, setUserStatus] = useState({ username: '', role: 'free', is_founder: false });
 
   const [aliceSpeed, setAliceSpeed] = useState<number>(1.0);
@@ -192,8 +188,7 @@ export default function NexusScreen() {
   const vozRef = useRef(0);
   
   const pulseAnim = useRef(new Animated.Value(1)).current;
-  const flashFadeAnim = useRef(new Animated.Value(0)).current;
-  const responseListener = useRef<any>();
+  const responseListener = useRef<any>(null);
 
   useFocusEffect(
     useCallback(() => {
@@ -209,8 +204,6 @@ export default function NexusScreen() {
 
   useEffect(() => {
     const loadPreferences = async () => {
-      const bio = await SecureStore.getItemAsync('use_biometrics');
-      setBiometricsEnabled(bio === 'true');
       const savedSpeed = await SecureStore.getItemAsync('alice_speed');
       if (savedSpeed) setAliceSpeed(parseFloat(savedSpeed));
     };
@@ -223,20 +216,23 @@ export default function NexusScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   };
 
+  // Día 19: el estado (rol/founder) se carga ya al entrar, no solo al abrir Settings,
+  // porque el Modo Dios lo necesita para decidir si deja activarse.
+  const fetchUserStatus = useCallback(async () => {
+    try {
+      const res = await apiFetch('/user/status');
+      if (res.ok) {
+        const data = await res.json();
+        setUserStatus(data);
+      }
+    } catch (e) { console.log("Status fetch error", e); }
+  }, []);
+
+  useEffect(() => { fetchUserStatus(); }, [fetchUserStatus]);
+
   useEffect(() => {
-    if (showSettingsModal) {
-      const fetchStatus = async () => {
-        try {
-          const res = await apiFetch('/user/status');
-          if (res.ok) {
-            const data = await res.json();
-            setUserStatus(data);
-          }
-        } catch (e) { console.log("Status fetch error", e); }
-      };
-      fetchStatus();
-    }
-  }, [showSettingsModal]);
+    if (showSettingsModal) fetchUserStatus();
+  }, [showSettingsModal, fetchUserStatus]);
 
   // ✅ NUEVO: Inicialización de RevenueCat y vinculación de usuario
   useEffect(() => {
@@ -266,8 +262,10 @@ export default function NexusScreen() {
   const handleRestorePurchases = async () => {
       try {
           const purchaserInfo = await Purchases.restorePurchases();
-          // Comprobamos si RevenueCat detecta que tienen la suscripción activa
-          if (purchaserInfo.entitlements.active['premium'] || purchaserInfo.entitlements.active['founder']) {
+          // Comprobamos si RevenueCat detecta que tienen la suscripción activa.
+          // Único plan de pago actual es 'plus' (Día 14/16); 'premium'/'founder' se mantienen
+          // por compatibilidad con compras antiguas que aún concedan esos entitlements.
+          if (purchaserInfo.entitlements.active['plus'] || purchaserInfo.entitlements.active['premium'] || purchaserInfo.entitlements.active['founder']) {
               showAlert("COMPRAS RESTAURADAS", "Tu acceso premium ha sido validado.", "success");
           } else {
               showAlert("SIN COMPRAS", "No se han encontrado suscripciones activas.", "warning");
@@ -289,7 +287,7 @@ export default function NexusScreen() {
     responseListener.current = Notifications.addNotificationResponseReceivedListener(response => {
       const data = response.notification.request.content.data;
       if (data && data.mode) {
-         handleRoutineTrigger(data.mode);
+         handleRoutineTrigger(data.mode as string);
       }
     });
 
@@ -325,18 +323,13 @@ export default function NexusScreen() {
       }
   };
 
-  useEffect(() => {
-    if (currentFlashState === 'choice') {
-        Animated.timing(flashFadeAnim, { toValue: 1, duration: 1000, useNativeDriver: true }).start();
-    } else {
-        flashFadeAnim.setValue(0);
-    }
-  }, [currentFlashState]);
-
   // ✅ LÓGICA DE LA CERRADURA SECRETA REINTEGRADA
+  // Día 19 (A16): el Modo Dios queda ligado al rol — solo founders pueden desbloquearlo,
+  // no cualquier usuario anónimo que descubra los 5 toques.
   const handleGodModeTap = () => {
-    if (isGodMode) return; 
-    
+    if (isGodMode) return;
+    if (!userStatus.is_founder) return;
+
     tapCount.current += 1;
     if (tapTimeout.current) clearTimeout(tapTimeout.current);
 
@@ -462,85 +455,6 @@ export default function NexusScreen() {
       : "Alice, it's time to sleep. Take me to the sanctuary.";
     
     triggerArtificialDialogue(sleepPrompt, 'sleep');
-  };
-
-  const triggerFlashReset = async () => {
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-    if (aiSpeaking) await stopSpeaking();
-    setAiThinking(true);
-    setSilentResponse(null);
-    setIsTextMode(false);
-    setCurrentFlashState('playing'); 
-    try { if (thinkingSoundRef.current) await thinkingSoundRef.current.playAsync(); } catch (e) {}
-    try {
-      const res = await apiFetch('/chat/text', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: "PROTOCOL_INITIATE_PANIC_RESET", mode: "flash", language: language, speed: aliceSpeed })
-      });
-      const data = await res.json();
-      handleBackendResponse(data, res, "flash", true, () => {
-          enterFlashSilence(); 
-      });
-    } catch (e: any) {
-      setCurrentFlashState('none');
-      if (e.message === 'SESSION_EXPIRED') return;
-      showAlert("SYSTEM ERROR", "System Offline. Breathe manually.", "error");
-      try { if (thinkingSoundRef.current) await thinkingSoundRef.current.stopAsync(); } catch (ex) {}
-    } finally { setAiThinking(false); }
-  };
-
-  const enterFlashSilence = () => {
-      setCurrentFlashState('silence');
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-      setTimeout(() => {
-          setCurrentFlashState('choice');
-          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      }, 15000); 
-  };
-
-  const handlePostFlashChoice = (choice: 'calm' | 'exit') => {
-      if (choice === 'calm') {
-          const calmMode = MODES.find(m => m.id === 'calm');
-          if (calmMode) setCurrentMode(calmMode);
-          setCurrentFlashState('none');
-      } else {
-          setCurrentFlashState('none');
-      }
-  };
-
-  const publishToNetwork = async () => {
-    if (!proposedVibration) return;
-    setIsPublishing(true);
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    try {
-      const payload = {
-        message: proposedVibration.echo_text || proposedVibration.echo || "Essence",
-        image_url: proposedVibration.existing_image_url || previewImage,
-        vault_id: proposedVibration.vault_id 
-      };
-      const res = await apiFetch('/vibrations/submit', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-      if (res.ok) {
-        const data = await res.json().catch(() => ({}));
-        setProposedVibration(null);
-        setPreviewImage(null);
-        cancelarEsperaImagen();
-        setShowVibrationModal(false);
-        if (data && data.crisis) {
-          // El backend no publica y devuelve ayuda: nada de "aceptado".
-          setAyuda({ texto: data.text });
-        } else {
-          showAlert("OFFERING ACCEPTED", "Your essence is now resonating.", "success");
-        }
-      } else { throw new Error("Failed"); }
-    } catch (e: any) {
-      if (e.message === 'SESSION_EXPIRED') return;
-      showAlert("CONNECTION LOST", "The Network is unreachable.", "error");
-    } finally { setIsPublishing(false); }
   };
 
   async function startRecording(modeOverride: string | null = null) {
@@ -769,7 +683,7 @@ export default function NexusScreen() {
       }
     } else if (data.text) {
       // Día 10: sin caracteres de voz neural este mes (tts:"device") la respuesta llega sin audio; al menos se lee.
-      // Día 11: y se oye con la voz del dispositivo. En autoplay avisa a onAudioComplete (flash) y, al
+      // Día 11: y se oye con la voz del dispositivo. En autoplay avisa a onAudioComplete y, al
       // terminar, para la música de sleep igual que el cuento neural.
       setSilentResponse({ text: data.text, audioUrl: null });
       if (autoPlay) await speakDevice(data.text, onAudioComplete);
@@ -777,14 +691,14 @@ export default function NexusScreen() {
   };
 
   const playStream = async (url: string, onComplete: (() => void) | null) => {
+    // Día 10: el audio es solo de quien lo pidió; sin el token, el backend responde 401.
+    // Día 11: el token solo va al backend; a R2 (biblioteca) o a otro host, nunca.
+    const token = url.startsWith(`${API_URL}/`) ? await getAuthToken() : null;
     try {
       if (thinkingSoundRef.current) await thinkingSoundRef.current.stopAsync();
       if (soundRef.current) await soundRef.current.unloadAsync();
       await pararVozDispositivo();
-      
-      // Día 10: el audio es solo de quien lo pidió; sin el token, el backend responde 401.
-      // Día 11: el token solo va al backend; a R2 (biblioteca) o a otro host, nunca.
-      const token = url.startsWith(`${API_URL}/`) ? await getAuthToken() : null;
+
       const { sound } = await Audio.Sound.createAsync(
         { uri: url, headers: token ? { Authorization: `Bearer ${token}` } : undefined },
         { shouldPlay: true, volume: 1.0 });
@@ -797,8 +711,26 @@ export default function NexusScreen() {
           if (onComplete) onComplete();
         }
       });
-    } catch (e) { 
+    } catch (e) {
         setAiSpeaking(false);
+        // TASK-24: antes fallaba en silencio. Si es un ticket del backend, se comprueba si
+        // expiró (404) para avisar con un mensaje claro en vez de uno genérico.
+        let haExpirado = false;
+        if (token) {
+          try {
+            // Usamos apiFetch (no fetch crudo) para que, si el access token había caducado,
+            // se intente el refresh antes de concluir que el ticket expiró.
+            const check = await apiFetch(url);
+            haExpirado = check.status === 404;
+          } catch (_) { /* sin red o sesión expirada: se queda en el mensaje genérico */ }
+        }
+        showAlert(
+          language === 'es' ? "ERROR DE AUDIO" : "AUDIO ERROR",
+          haExpirado
+            ? (language === 'es' ? "Este mensaje de voz ha expirado." : "This voice message has expired.")
+            : (language === 'es' ? "No se pudo reproducir el audio." : "Could not play the audio."),
+          "error"
+        );
         if (onComplete) onComplete();
     }
   };
@@ -849,8 +781,8 @@ export default function NexusScreen() {
   const handleLogout = async () => {
     setShowSettingsModal(false);
     if (aiSpeaking) await stopSpeaking();
-    await SecureStore.deleteItemAsync('user_token');
-    if (Platform.OS === 'web') localStorage.removeItem('user_token');
+    await logoutRequest(); // TASK-05: revoca el token en el backend y limpia los locales
+    await lockGodMode(); // Día 19: la siguiente cuenta en este dispositivo no hereda el Modo Dios
     router.replace('/login');
   };
 
@@ -866,22 +798,6 @@ export default function NexusScreen() {
         }
       }
     ]);
-  };
-
-  const handleBiometricToggle = async (value: boolean) => {
-    if (value) {
-      const hasHardware = await LocalAuthentication.hasHardwareAsync();
-      if (!hasHardware) return showAlert("HARDWARE ERROR", "Biometrics unavailable.", "error");
-      const result = await LocalAuthentication.authenticateAsync({ promptMessage: 'Authorize' });
-      if (result.success) {
-        setBiometricsEnabled(true);
-        await SecureStore.setItemAsync('use_biometrics', 'true');
-        showAlert("SECURITY UPGRADED", "Biometric access enabled.", "success");
-      }
-    } else {
-      setBiometricsEnabled(false);
-      await SecureStore.deleteItemAsync('use_biometrics');
-    }
   };
 
   const handleDownloadImage = async () => {
@@ -1182,41 +1098,6 @@ export default function NexusScreen() {
       )}
       </KeyboardAvoidingView>
 
-      {currentFlashState !== 'none' && (
-          <Modal visible={true} transparent={true} animationType="fade">
-            <View style={[styles.modalOverlay, { backgroundColor: '#000' }]}>
-                {currentFlashState !== 'choice' && (
-                    <Animated.View style={{ opacity: 1, alignItems: 'center' }}>
-                        {currentFlashState === 'playing' && (
-                            <View style={[styles.orbCore, { borderColor: '#EF4444', backgroundColor: '#450a0a', width: 100, height: 100, borderRadius: 50 }]}>
-                                <Waveform color="#EF4444" />
-                            </View>
-                        )}
-                    </Animated.View>
-                )}
-                {currentFlashState === 'choice' && (
-                    <Animated.View style={{ opacity: flashFadeAnim, alignItems: 'center', width: '80%' }}>
-                        <Text style={{ color: '#fff', fontSize: 18, marginBottom: 40, textAlign: 'center', fontWeight: '300' }}>
-                            {language === 'es' ? "¿Quieres seguir calmando el cuerpo?" : "Do you want to continue calming the body?"}
-                        </Text>
-                        <TouchableOpacity 
-                            style={{ backgroundColor: '#10B981', paddingVertical: 15, paddingHorizontal: 30, borderRadius: 30, marginBottom: 20, width: '100%', alignItems: 'center' }}
-                            onPress={() => handlePostFlashChoice('calm')}
-                        >
-                            <Text style={{ color: '#000', fontWeight: 'bold', letterSpacing: 1 }}>{language === 'es' ? "CONTINUAR (CALMA)" : "CONTINUE (CALM)"}</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity 
-                            style={{ paddingVertical: 15, width: '100%', alignItems: 'center' }}
-                            onPress={() => handlePostFlashChoice('exit')}
-                        >
-                            <Text style={{ color: '#64748B', fontWeight: 'bold', letterSpacing: 1 }}>{language === 'es' ? "NO, ESTOY BIEN" : "NO, I'M OK"}</Text>
-                        </TouchableOpacity>
-                    </Animated.View>
-                )}
-            </View>
-          </Modal>
-      )}
-
       <Modal visible={showVibrationModal} transparent={true} animationType="slide">
         <View style={styles.modalOverlay}>
           <View style={[styles.cyberAlertBox, { borderColor: '#38BDF8', width: 340, padding: 0, overflow: 'hidden', backgroundColor: '#09090b' }]}>
@@ -1272,11 +1153,8 @@ export default function NexusScreen() {
               <Text style={{ color: '#38BDF8', fontSize: 9, letterSpacing: 2, marginBottom: 10, fontWeight: 'bold' }}>ESSENCE DISTILLED</Text>
               <Text style={{ color: 'white', fontSize: 16, fontStyle: 'italic', textAlign: 'center', marginBottom: 20, lineHeight: 24, fontWeight: '300' }}>"{proposedVibration?.echo_text}"</Text>
               <View style={{ flexDirection: 'row', gap: 15 }}>
-                <TouchableOpacity style={styles.alertBtnGhost} onPress={() => { setShowVibrationModal(false); setPreviewImage(null); cancelarEsperaImagen(); }}>
-                  <Text style={styles.alertBtnTextGhost}>DISCARD</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={[styles.alertBtn, {backgroundColor: 'rgba(56, 189, 248, 0.1)', borderColor: '#38BDF8', opacity: imagePending ? 0.5 : 1}]} onPress={publishToNetwork} disabled={isPublishing || imagePending}>
-                  <Text style={[styles.alertBtnText, {color: '#38BDF8'}]}>{isPublishing ? "SENDING..." : "RESONATE"}</Text>
+                <TouchableOpacity style={[styles.alertBtn, {backgroundColor: 'rgba(56, 189, 248, 0.1)', borderColor: '#38BDF8'}]} onPress={() => { setShowVibrationModal(false); setPreviewImage(null); cancelarEsperaImagen(); }}>
+                  <Text style={[styles.alertBtnText, {color: '#38BDF8'}]}>{language === 'es' ? 'CERRAR' : 'CLOSE'}</Text>
                 </TouchableOpacity>
               </View>
             </View>
@@ -1344,32 +1222,6 @@ export default function NexusScreen() {
             <ScrollView style={styles.settingsBody}>
               {renderUserBadge()}
 
-              <Text style={styles.settingSectionTitle}>{t('settings.security')}</Text>
-              <View style={styles.settingRow}>
-                <View style={{flexDirection:'row', alignItems:'center', gap:10}}>
-                  <Ionicons name="finger-print-outline" size={20} color="#38BDF8" />
-                  <Text style={styles.settingLabel}>{t('settings.bio_access')}</Text>
-                </View>
-                <Switch
-                  value={biometricsEnabled}
-                  onValueChange={handleBiometricToggle}
-                  trackColor={{ false: '#334155', true: '#38BDF8' }}
-                  thumbColor={'#fff'}
-                />
-              </View>
-              <View style={styles.settingRow}>
-                <View style={{flexDirection:'row', alignItems:'center', gap:10}}>
-                  <Ionicons name="notifications-outline" size={20} color="#38BDF8" />
-                  <Text style={styles.settingLabel}>{t('settings.notifications')}</Text>
-                </View>
-                <Switch
-                  value={notificationsEnabled}
-                  onValueChange={setNotificationsEnabled}
-                  trackColor={{ false: '#334155', true: '#38BDF8' }}
-                  thumbColor={'#fff'}
-                />
-              </View>
-
               <Text style={styles.settingSectionTitle}>{language === 'es' ? "RITMO DE ALICE" : "ALICE'S RHYTHM"}</Text>
               <View style={styles.langSelectorRow}>
                 <TouchableOpacity 
@@ -1414,8 +1266,12 @@ export default function NexusScreen() {
                 </TouchableOpacity>
               </View>
 
-              <TouchableOpacity style={styles.linkRow} onPress={() => showAlert("PRIVACY PROTOCOL", "Data is end-to-end encrypted.", "success")}>
+              <TouchableOpacity style={styles.linkRow} onPress={() => Linking.openURL('https://whispermindai.com/privacy/')}>
                 <Text style={styles.linkText}>Privacy Policy</Text>
+                <Ionicons name="chevron-forward" size={16} color="#64748B" />
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.linkRow} onPress={() => Linking.openURL('https://whispermindai.com/delete_account/')}>
+                <Text style={styles.linkText}>{language === 'es' ? "Cómo eliminar mi cuenta" : "How to delete my account"}</Text>
                 <Ionicons name="chevron-forward" size={16} color="#64748B" />
               </TouchableOpacity>
               <TouchableOpacity style={styles.linkRow} onPress={() => router.push('/subscription')}>
@@ -1437,7 +1293,7 @@ export default function NexusScreen() {
                 <Ionicons name="trash-outline" size={20} color="#fff" />
                 <Text style={styles.actionBtnText}>{t('settings.btn_delete')}</Text>
               </TouchableOpacity>
-              <Text style={styles.versionText}>Whisper Mind v1.2.0 (Stable)</Text>
+              <Text style={styles.versionText}>Whisper Mind v{Constants.expoConfig?.version ?? '?'}</Text>
             </ScrollView>
           </View>
         </View>

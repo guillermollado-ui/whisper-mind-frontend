@@ -15,14 +15,14 @@ import {
     StyleSheet,
     ActivityIndicator,
     KeyboardAvoidingView,
-    Platform
+    Platform,
+    Linking
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
-import * as SecureStore from 'expo-secure-store';
-import { API_URL } from '../../utils/api';
+import { API_URL, storeTokens } from '../../utils/api';
 // ✅ IMPORTAMOS EL SISTEMA DE ALERTAS
 import { useAlert } from '../../src/context/AlertContext';
 
@@ -81,7 +81,7 @@ export default function RegisterScreen() {
                     'Content-Type': 'application/json',
                     'Accept': 'application/json'
                 },
-                body: JSON.stringify({ token: idToken }),
+                body: JSON.stringify({ token: idToken, disclaimer_accepted: disclaimerAccepted }),
             });
 
             // Día 17: el login con Google también tiene límite de intentos.
@@ -98,11 +98,7 @@ export default function RegisterScreen() {
             }
 
             // Guardamos token
-            if (Platform.OS === 'web') {
-                localStorage.setItem('user_token', data.access_token);
-            } else {
-                await SecureStore.setItemAsync('user_token', data.access_token);
-            }
+            await storeTokens(data.access_token, data.refresh_token);
 
             // Redirigir según estado
             if (data.onboarding_completed === false) {
@@ -267,7 +263,10 @@ export default function RegisterScreen() {
 
                     <TouchableOpacity style={styles.disclaimerContainer} onPress={() => setDisclaimerAccepted(!disclaimerAccepted)}>
                         <Ionicons name={disclaimerAccepted ? "checkbox" : "square-outline"} size={24} color={disclaimerAccepted ? "#10B981" : "#64748B"} style={{marginRight: 10}} />
-                        <Text style={styles.disclaimerText}>I acknowledge that Whisper Mind is an AI tool, <Text style={{color: '#ef4444', fontWeight: 'bold'}}>NOT a doctor</Text>.</Text>
+                        <Text style={styles.disclaimerText}>
+                            I confirm I am <Text style={{fontWeight: 'bold'}}>18 or older</Text>. I understand Whisper Mind is an AI tool, <Text style={{color: '#ef4444', fontWeight: 'bold'}}>NOT a doctor or a substitute for therapy</Text>, and I consent to the processing of the emotional and wellness data I share with Alice, as described in the{' '}
+                            <Text style={{color: '#10B981', textDecorationLine: 'underline'}} onPress={() => Linking.openURL('https://whispermindai.com/privacy/')}>Privacy Policy</Text>.
+                        </Text>
                     </TouchableOpacity>
 
                     <TouchableOpacity style={[styles.registerBtn, !disclaimerAccepted && {opacity: 0.5}]} onPress={handleRegister} disabled={loading || !disclaimerAccepted}>

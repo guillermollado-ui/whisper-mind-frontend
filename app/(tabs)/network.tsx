@@ -61,7 +61,7 @@ export default function NetworkScreen() {
   
  // ✅ [NUEVO] Referencias para el cronómetro
  const pressStartTime = useRef(0);
- const timerRef = useRef<NodeJS.Timeout | null>(null);
+ const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
  useFocusEffect(
    useCallback(() => {
@@ -128,7 +128,7 @@ export default function NetworkScreen() {
    }).start();
  };
 
- const getAtmosphereColors = (tag: string) => {
+ const getAtmosphereColors = (tag: string): [string, string] => {
    const tagLower = tag?.toLowerCase() || "";
    if (tagLower.includes("joy") || tagLower.includes("hope") || tagLower.includes("light") || tagLower.includes("alegría") || tagLower.includes("esperanza")) return ['rgba(245, 158, 11, 0.4)', '#000000']; 
    if (tagLower.includes("grief") || tagLower.includes("sad") || tagLower.includes("rain") || tagLower.includes("duelo") || tagLower.includes("triste")) return ['rgba(30, 58, 138, 0.5)', '#000000']; 

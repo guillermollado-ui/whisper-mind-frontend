@@ -1,10 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ActivityIndicator, StyleSheet, KeyboardAvoidingView, Platform, Image } from 'react-native';
 import { useRouter, Link } from 'expo-router';
-import * as SecureStore from 'expo-secure-store';
 import { StatusBar } from 'expo-status-bar';
 import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
-import { API_URL } from '../../utils/api';
+import { API_URL, storeTokens } from '../../utils/api';
 // ✅ IMPORTAMOS EL SISTEMA DE ALERTAS
 import { useAlert } from '../../src/context/AlertContext';
 
@@ -32,11 +31,7 @@ export default function LoginScreen() {
   // 🌍 MANEJO DE RESPUESTA DEL BACKEND (COMÚN PARA EMAIL Y GOOGLE)
   const handleAuthResponse = async (data: any) => {
     if (data.access_token) {
-      if (Platform.OS === 'web') {
-        localStorage.setItem('user_token', data.access_token);
-      } else {
-        await SecureStore.setItemAsync('user_token', data.access_token);
-      }
+      await storeTokens(data.access_token, data.refresh_token);
 
       if (data.onboarding_completed === false) {
         router.replace('/onboarding');
@@ -78,6 +73,12 @@ export default function LoginScreen() {
       const data = await response.json();
 
       if (!response.ok) {
+        // Cuenta de Google nueva: aún no ha aceptado el disclaimer/consentimiento, que solo se pide en Register.
+        if (response.status === 400 && data.detail === 'Accept disclaimer') {
+          showAlert('ONE MORE STEP', 'First-time sign-in: please use "Create Account" to accept the required disclaimer.', 'warning');
+          router.push('/register');
+          return;
+        }
         throw new Error(data.detail || 'Google Auth Failed');
       }
 

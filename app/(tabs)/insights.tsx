@@ -22,7 +22,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { LineChart } from 'react-native-chart-kit';
 import { Audio } from 'expo-av';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import ConfettiCannon from 'react-native-confetti-cannon';
 import { API_URL, apiFetch, getAuthToken } from '../../utils/api';
 import { useAlert } from '../../src/context/AlertContext';
@@ -190,17 +190,13 @@ export default function InsightsScreen() {
             const res = await apiFetch('/insights');
             const json = await res.json();
             if (res.ok) {
-                const fakeDistribution: Record<string, number> = {};
-                if (!json.category_distribution || Object.keys(json.category_distribution).length === 0) {
-                    fakeDistribution["Resilience"] = 4;
-                    fakeDistribution["Clarity"] = 2;
-                    fakeDistribution["Anxiety"] = 1;
-                    fakeDistribution["Focus"] = 5;
-                } else {
-                    Object.assign(fakeDistribution, json.category_distribution);
-                }
-                const moodData = json.weekly_mood && json.weekly_mood.length > 0 ? json.weekly_mood : [5, 5, 5, 5, 5];
-                const adaptedData = { mood_trend: moodData, category_distribution: fakeDistribution, total_sessions: moodData.length };
+                // A15 (Día 19): sin datos inventados. Si el backend no manda distribución
+                // todavía, se deja vacía y la pantalla muestra el estado "sin datos".
+                const distribution = json.category_distribution && Object.keys(json.category_distribution).length > 0
+                    ? json.category_distribution
+                    : null;
+                const moodData = json.weekly_mood && json.weekly_mood.length > 0 ? json.weekly_mood : [];
+                const adaptedData = { mood_trend: moodData, category_distribution: distribution, total_sessions: moodData.length };
                 setData(adaptedData);
                 return adaptedData;
             }
@@ -475,7 +471,8 @@ export default function InsightsScreen() {
                 )}
                 <View style={{height: 100}} />
             </ScrollView>
-            <ConfettiCannon count={150} origin={{x: -10, y: 0}} autoStart={false} ref={confettiRef} fadeOut={true} fallSpeed={3500} zIndex={1000} />
+            {/* zIndex: la librería lo acepta en runtime pero sus tipos no lo declaran. */}
+            <ConfettiCannon count={150} origin={{x: -10, y: 0}} autoStart={false} ref={confettiRef} fadeOut={true} fallSpeed={3500} {...({ zIndex: 1000 } as any)} />
 
             {/* ✅ [NUEVO] Guía de Iniciación para el INSIGHTS */}
             <InitiationOverlay 

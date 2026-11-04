@@ -12,8 +12,12 @@
         "buildType": "apk"
       }
     },
-    "production": {}
+    "production": {
+      "autoIncrement": true,
+      "env": { "EXPO_PUBLIC_API_URL": "https://wishpermind-backend.onrender.com" }
+    }
   },
+  "appVersionSource": "local",
   "submit": {
     "production": {}
   }

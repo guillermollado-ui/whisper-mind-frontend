@@ -72,10 +72,13 @@ export default function RootLayout() {
         await Purchases.logIn(userId);
       }
 
-      const inAuthGroup = segments[0] === '(auth)';
-      const inOnboarding = segments[0] === 'onboarding';
-      const inLegalZone = segments[0] === 'privacy' || segments[0] === 'delete_account';
-      const isIndex = segments.length === 0 || segments[0] === 'index';
+      // El tipo generado por expo-router para useSegments() no incluye la ruta raíz vacía ni
+      // "index" como segmento literal; se comparan como string a propósito, en runtime sí ocurren.
+      const segmentosComoTexto = segments as readonly string[];
+      const inAuthGroup = segmentosComoTexto[0] === '(auth)';
+      const inOnboarding = segmentosComoTexto[0] === 'onboarding';
+      const inLegalZone = segmentosComoTexto[0] === 'privacy' || segmentosComoTexto[0] === 'delete_account';
+      const isIndex = segmentosComoTexto.length === 0 || segmentosComoTexto[0] === 'index';
       const inPublicZone = inAuthGroup || inOnboarding || inLegalZone;
 
       if (ready) {

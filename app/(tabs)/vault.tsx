@@ -6,7 +6,6 @@ import {
   Image,
   ActivityIndicator,
   RefreshControl,
-  Platform,
   TouchableOpacity,
   Alert,
   FlatList,
@@ -25,20 +24,19 @@ import * as Haptics from 'expo-haptics';
 import { useLanguage } from '../../src/context/LanguageContext';
 // ✅ [NUEVO] Importamos la Guía de Iniciación
 import InitiationOverlay from '../../components/InitiationOverlay';
-
-const API_URL = 'https://wishpermind-backend.onrender.com';
+import { API_URL, apiFetch, getAuthToken } from '../../utils/api';
 
 // --- COLORES DE MODOS ---
-const MODE_COLORS = {
-  default: '#38BDF8', calm: '#10B981', win: '#F59E0B', sleep: '#8B5CF6', 
-  dream: '#6366F1', morning: '#F472B6', flash: '#EF4444', journal: '#0EA5E9'
+const MODE_COLORS: Record<string, string> = {
+  default: '#38BDF8', calm: '#10B981', win: '#F59E0B', sleep: '#8B5CF6',
+  dream: '#6366F1', morning: '#F472B6', journal: '#0EA5E9'
 };
 
 // --- LÍMITES DE ARQUETIPOS ---
 const ARCHETYPE_LIMITS = [0, 3, 10, 25];
 
 // ✅ [NUEVO] Componente para mostrar los "Ecos" (Resonancias)
-const ResonanceBadge = ({ counts }) => {
+const ResonanceBadge = ({ counts }: { counts: any }) => {
   if (!counts) return null;
   
   // Total de interacciones
@@ -62,7 +60,7 @@ const ResonanceBadge = ({ counts }) => {
 };
 
 // --- COMPONENTE TEXTO EXPANDIBLE ---
-const ExpandableText = ({ text, color, t }) => {
+const ExpandableText = ({ text, color, t }: { text: any; color: any; t: any }) => {
   const [isExpanded, setIsExpanded] = useState(false);
   if (!text) return null;
   const cleanText = text.replace(/^"|"$/g, ''); 
@@ -84,8 +82,8 @@ const ExpandableText = ({ text, color, t }) => {
 export default function VaultScreen() {
   const { t, language } = useLanguage(); // 🌍 Usamos el hook de idioma
   const [activeTab, setActiveTab] = useState('journal'); 
-  const [vaultItems, setVaultItems] = useState([]); 
-  const [chatItems, setChatItems] = useState([]);   
+  const [vaultItems, setVaultItems] = useState<any[]>([]);
+  const [chatItems, setChatItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [displayLimit, setDisplayLimit] = useState(10);
@@ -128,7 +126,7 @@ export default function VaultScreen() {
     });
 
     return {
-      ...archetypes[index],
+      ...(archetypes[index] as any),
       icon: icons[index],
       color: colors[index]
     };
@@ -136,12 +134,7 @@ export default function VaultScreen() {
 
   const currentArchetype = getArchetypeData();
 
-  const getAuthToken = async () => {
-    if (Platform.OS === 'web') return localStorage.getItem('user_token');
-    return await SecureStore.getItemAsync('user_token');
-  };
-
-  const getImageUrl = (url) => {
+  const getImageUrl = (url: any) => {
     if (!url) return null;
     if (url.startsWith('data:image')) return url;
     if (url.startsWith('/images/')) return `${API_URL}${url}`;
@@ -153,40 +146,43 @@ export default function VaultScreen() {
       const token = await getAuthToken();
       if (!token) { setLoading(false); return; }
 
-      // 1. Cargar VAULT
-      const resVault = await fetch(`${API_URL}/vault`, { headers: { 'Authorization': `Bearer ${token}` } });
-      const dataVault = await resVault.json();
-      
-      // 🔍 [DEBUG] INSPECCIÓN DE DATOS RECIBIDOS (Para consola de PC)
-      console.log("DATOS DEL VAULT (DEBUG):", JSON.stringify(dataVault, null, 2));
-      
-      if (resVault.ok) {
-        // ✅ [NUEVO] Enriquecer con datos de resonancia (Ecos)
-        const enrichedVault = await Promise.all(dataVault.map(async (item) => {
-            if (item.vibration_id) {
-                try {
-                    const resCount = await fetch(`${API_URL}/api/resonance/${item.vibration_id}`, {
-                        headers: { 'Authorization': `Bearer ${token}` }
-                    });
-                    if (resCount.ok) {
-                        const countData = await resCount.json();
-                        return { ...item, resonanceCounts: countData.counts };
-                    }
-                } catch (e) { return item; }
-            }
-            return item;
-        }));
-        setVaultItems(enrichedVault);
-      }
+      const loadVault = async () => {
+        const resVault = await apiFetch('/vault');
+        const dataVault = await resVault.json();
+        if (resVault.ok) {
+          // Día 19 (A5): una sola llamada para todos los ecos en vez de un GET por tarjeta (N+1).
+          const vibrationIds = dataVault.map((item: any) => item.vibration_id).filter(Boolean);
+          let resonanceById: Record<string, any> = {};
+          if (vibrationIds.length > 0) {
+            try {
+              const resBatch = await apiFetch(`/api/resonance/batch?ids=${vibrationIds.join(',')}`);
+              if (resBatch.ok) resonanceById = await resBatch.json();
+            } catch (e) { /* sin ecos esta vez, no bloquea el Vault */ }
+          }
+          const enrichedVault = dataVault.map((item: any) => (
+            item.vibration_id && resonanceById[item.vibration_id]
+              ? { ...item, resonanceCounts: resonanceById[item.vibration_id].counts }
+              : item
+          ));
+          setVaultItems(enrichedVault);
+        }
+      };
 
-      // 2. Cargar CHATS
-      const resChat = await fetch(`${API_URL}/chat/history`, { headers: { 'Authorization': `Bearer ${token}` } });
-      const dataChat = await resChat.json();
-      if (resChat.ok) {
-          const aiEntries = dataChat.filter(msg => msg.role === 'assistant');
-          setChatItems(aiEntries);
-      }
-    } catch (e) { console.error("Error fetching data:", e); } finally { setLoading(false); setRefreshing(false); }
+      const loadChats = async () => {
+        const resChat = await apiFetch('/chat/history');
+        const dataChat = await resChat.json();
+        if (resChat.ok) {
+            const aiEntries = dataChat.filter((msg: any) => msg.role === 'assistant');
+            setChatItems(aiEntries);
+        }
+      };
+
+      // /vault (+ecos) y /chat/history son independientes: se piden en paralelo en vez
+      // de en serie para no duplicar la latencia de red en cada foco/refresh del Vault.
+      await Promise.all([loadVault(), loadChats()]);
+    } catch (e: any) {
+      if (e.message !== 'SESSION_EXPIRED') console.error("Error fetching data:", e);
+    } finally { setLoading(false); setRefreshing(false); }
   };
 
   useFocusEffect(useCallback(() => { fetchAllData(); }, []));
@@ -208,7 +204,7 @@ export default function VaultScreen() {
       setDisplayLimit(prev => prev + 10);
   };
 
-  const handleShareImage = async (url) => {
+  const handleShareImage = async (url: any) => {
     try {
       const finalUrl = getImageUrl(url);
       if (!finalUrl) {
@@ -234,12 +230,12 @@ export default function VaultScreen() {
     }
   };
 
-  const handleShareText = async (text, title) => { 
+  const handleShareText = async (text: any, title: any) => {
     try { await Share.share({ message: `${title}\n\n${text}` }); } 
     catch (error) { Alert.alert(t('vault.alerts.share_error')); } 
   };
 
-  const renderVisualCard = ({ item }) => {
+  const renderVisualCard = ({ item }: { item: any }) => {
     const isJournal = activeTab === 'journal';
     const accentColor = isJournal ? '#38BDF8' : '#6366F1'; 
     const dateObj = new Date(item.date);
@@ -267,11 +263,6 @@ export default function VaultScreen() {
 
             <View style={styles.textContainer}>
                 <ExpandableText text={item.summary || item.prompt} color={accentColor} t={t} />
-                
-                {/* 🔍 [CHIVATO VISUAL] Si estás en modo sueño y falta el ID, aparecerá este aviso */}
-                {activeTab === 'dream' && !item.vibration_id && (
-                  <Text style={styles.debugText}>⚠️ NO LINKED TO NETWORK</Text>
-                )}
 
                 {isJournal && item.action && (
                     <View style={styles.actionBox}>
@@ -308,7 +299,7 @@ export default function VaultScreen() {
     );
   };
 
-  const renderChatCard = ({ item }) => {
+  const renderChatCard = ({ item }: { item: any }) => {
     const mode = item.mode || 'default';
     const color = MODE_COLORS[mode] || MODE_COLORS.default;
     const dateObj = new Date(item.timestamp);
@@ -404,20 +395,20 @@ export default function VaultScreen() {
             </>
         }
         ListEmptyComponent={
-            !loading && (
+            !loading ? (
                 <View style={styles.emptyState}>
                     <Ionicons name="file-tray-outline" size={48} color="#334155" />
                     <Text style={styles.emptyText}>{t('vault.empty_state')}</Text>
                 </View>
-            )
+            ) : null
         }
         ListFooterComponent={
-             showLoadMore && (
+             showLoadMore ? (
                  <TouchableOpacity style={styles.loadMoreBtn} onPress={handleLoadMore}>
                      <Text style={styles.loadMoreText}>{t('vault.load_more')}</Text>
                      <Ionicons name="chevron-down" size={16} color="#94A3B8" />
                  </TouchableOpacity>
-             )
+             ) : null
         }
       />
 
